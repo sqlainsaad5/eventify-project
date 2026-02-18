@@ -310,7 +310,7 @@ export default function HomePage() {
           </div>
 
           <div className="pt-8 border-t border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
-            <p className="text-slate-400 text-sm font-bold">© 2025 Eventify Inc. All rights reserved.</p>
+            <p className="text-slate-400 text-sm font-bold">© 2026 Eventify Inc. All rights reserved.</p>
             <div className="flex gap-6">
               <Shield className="h-5 w-5 text-slate-300 hover:text-slate-900 transition-colors cursor-pointer" />
               <Smartphone className="h-5 w-5 text-slate-300 hover:text-slate-900 transition-colors cursor-pointer" />
