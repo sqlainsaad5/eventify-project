@@ -1,0 +1,19 @@
+# Root .gitignore for Eventify Project
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Garbage files in root
+git-filter-repo
+how 2e8a2f59389bf7007132799d8323d36126dce24d
+t --objects --all  grep [blobid from error]
+
+# Subdirectory specific ignores are handled by their respective .gitignore files, 
+# but we can add redundancy here if needed.
+eventify-app/.env.local
+eventify-backend/.env
+eventify-backend/instance/
+eventify-backend/uploads/
+node_modules/
+.next/
