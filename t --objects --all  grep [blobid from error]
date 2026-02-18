@@ -1,0 +1,21 @@
+[33mcommit 2e8a2f59389bf7007132799d8323d36126dce24d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: Anam Riaz <anamriaz679@gmail.com>
+Date:   Sun Feb 15 19:51:50 2026 +0500
+
+    Backend Updated
+
+[1mdiff --git a/eventify-backend/app/__init__.py b/eventify-backend/app/__init__.py[m
+[1mindex ee48c61..b1d5413 100644[m
+[1m--- a/eventify-backend/app/__init__.py[m
+[1m+++ b/eventify-backend/app/__init__.py[m
+[36m@@ -7,6 +7,7 @@[m [mfrom flask_cors import CORS[m
+ from dotenv import load_dotenv[m
+ load_dotenv()[m
+ [m
+[32m+[m[32m# ✅ TEMPORARY DATA STORAGE[m
+ # ✅ TEMPORARY DATA STORAGE[m
+ # temporary_services = [][m
+ # next_service_id = 1[m
+[1mdiff --git a/eventify-backend/app/__pycache__/__init__.cpython-313.pyc b/eventify-backend/app/__pycache__/__init__.cpython-313.pyc[m
+[1mindex 61226a6..38b2258 100644[m
+Binary files a/eventify-backend/app/__pycache__/__init__.cpython-313.pyc and b/eventify-backend/app/__pycache__/__init__.cpython-313.pyc differ

@@ -67,3 +67,5 @@ eventify-project/
 ## 📄 License
 
 MIT License
+
+# eventify-project
