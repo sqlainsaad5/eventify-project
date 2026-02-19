@@ -14,16 +14,17 @@ stripe.api_key = Config.STRIPE_SECRET_KEY
 demo_notifications = []
 notification_counter = 1
 
-def create_notification(user_id, title, message, notification_type="info"):
+def create_notification(user_id, title, message, notification_type="info", extra_data=None):
     global notification_counter
     notification = {
         "id": notification_counter,
-        "user_id": user_id,
+        "user_id": int(user_id),
         "title": title,
         "message": message,
         "type": notification_type,
         "is_read": False,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "extra_data": extra_data
     }
     demo_notifications.append(notification)
     notification_counter += 1
@@ -76,6 +77,14 @@ def handle_payment_success(payment_intent):
                     if pr:
                         pr.status = 'paid'
                         print(f"✅ Vendor settlement (Request {request_id}) marked as PAID")
+                        # Notify Vendor
+                        create_notification(
+                            pr.vendor_id,
+                            "💰 Payment Received!",
+                            f"Your payment request for '{pr.event.name}' has been settled.",
+                            "payment",
+                            {"request_id": pr.id}
+                        )
                 
                 db.session.commit()
                 print(f"✨ Payment {payment_id} marked as COMPLETED in database")
@@ -227,6 +236,18 @@ def request_payment():
     pr = PaymentRequest(event_id=data['event_id'], vendor_id=user_id, amount=float(data['amount']), description=data.get('description',''), status='pending')
     db.session.add(pr)
     db.session.commit()
+    
+    # Notify Organizer
+    event = Event.query.get(data['event_id'])
+    if event:
+        create_notification(
+            event.user_id,
+            "💸 Payment Request",
+            f"Vendor has requested ${data['amount']} for '{event.name}'.",
+            "payment",
+            {"request_id": pr.id, "event_id": event.id}
+        )
+    
     return jsonify({"message": "Request submitted"}), 201
 
 @payments_bp.route("/requests/<int:rid>/approve", methods=["PUT"])
@@ -235,6 +256,16 @@ def approve_request(rid):
     pr = PaymentRequest.query.get(rid)
     pr.status = 'approved'
     db.session.commit()
+    
+    # Notify Vendor
+    create_notification(
+        pr.vendor_id,
+        "✅ Request Approved",
+        f"Your payment request for '{pr.event.name}' was approved.",
+        "success",
+        {"request_id": pr.id}
+    )
+    
     return jsonify({"message": "Approved"}), 200
 
 @payments_bp.route("/requests/<int:rid>/reject", methods=["PUT"])
@@ -243,6 +274,16 @@ def reject_request(rid):
     pr = PaymentRequest.query.get(rid)
     pr.status = 'rejected'
     db.session.commit()
+    
+    # Notify Vendor
+    create_notification(
+        pr.vendor_id,
+        "❌ Request Rejected",
+        f"Your payment request for '{pr.event.name}' was rejected.",
+        "error",
+        {"request_id": pr.id}
+    )
+    
     return jsonify({"message": "Rejected"}), 200
 
 @payments_bp.route("/requests/<int:rid>/process-payment", methods=["POST"])
@@ -259,4 +300,50 @@ def process_settlement(rid):
 @jwt_required()
 def get_notifications():
     user_id = get_jwt_identity()
-    return jsonify({"notifications": [n for n in demo_notifications if n['user_id'] == user_id]}), 200
+    user_notifs = [n for n in demo_notifications if int(n['user_id']) == int(user_id)]
+    return jsonify({"notifications": user_notifs}), 200
+
+@payments_bp.route("/notifications/<int:nid>/read", methods=["PUT"])
+@jwt_required()
+def mark_notification_read(nid):
+    user_id = get_jwt_identity()
+    for n in demo_notifications:
+        if int(n['id']) == int(nid) and int(n['user_id']) == int(user_id):
+            n['is_read'] = True
+            return jsonify({"message": "Marked as read"}), 200
+    return jsonify({"error": "Notification not found"}), 404
+
+@payments_bp.route("/notifications/clear-chat", methods=["PUT"])
+@jwt_required()
+def clear_chat_notifications():
+    user_id = get_jwt_identity()
+    user_id = int(user_id)
+    data = request.get_json()
+    sender_id = data.get("sender_id")
+    
+    if not sender_id:
+        return jsonify({"error": "sender_id required"}), 400
+        
+    count = 0
+    for n in demo_notifications:
+        # Match user_id as receiver, type 'chat', and extra_data.sender_id matches the param
+        if (int(n['user_id']) == user_id and 
+            n['type'] == 'chat' and 
+            n.get('extra_data') and 
+            int(n['extra_data'].get('sender_id')) == int(sender_id)):
+            if not n['is_read']:
+                n['is_read'] = True
+                count += 1
+                
+    return jsonify({"message": f"Cleared {count} chat notifications"}), 200
+
+@payments_bp.route("/notifications/clear-all", methods=["PUT"])
+@jwt_required()
+def clear_all_notifications():
+    user_id = int(get_jwt_identity())
+    count = 0
+    for n in demo_notifications:
+        if int(n['user_id']) == user_id and not n['is_read']:
+            n['is_read'] = True
+            count += 1
+    return jsonify({"message": f"Cleared {count} notifications"}), 200

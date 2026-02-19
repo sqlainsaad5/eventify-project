@@ -3,326 +3,233 @@
 import { useState, useEffect } from "react"
 import { VendorLayout } from "@/components/vendor-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Pencil, Trash2, PlusCircle, MapPin, Calendar, Clock } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
+import {
+  Briefcase,
+  Plus,
+  Edit2,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  Loader2,
+  Package,
+  DollarSign,
+  Tag,
+  MapPin,
+} from "lucide-react"
+import { toast } from "sonner"
 
-interface ServicePackage {
-  packageName: string
-  price: number
-  duration: string
-  features: string[]
-}
-
-interface Service {
-  id: number
+// Matches the backend Service model fields exactly
+interface ServiceForm {
   name: string
   category: string
   eventType: string
   basePrice: number
   description: string
-  packages: ServicePackage[]
-  availability: string[]
   location: string
-  portfolioImages: string[]
-  isActive: boolean
-  vendor_id: number
+  packages: { packageName: string; price: number; duration: string; features: string[] }[]
 }
 
-const API_BASE = "http://localhost:5000";
+const emptyForm: ServiceForm = {
+  name: "",
+  category: "",
+  eventType: "",
+  basePrice: 0,
+  description: "",
+  location: "",
+  packages: [{ packageName: "", price: 0, duration: "", features: [] }],
+}
 
 export default function VendorServicesPage() {
-  const [services, setServices] = useState<Service[]>([])
+  const [services, setServices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [form, setForm] = useState<ServiceForm>(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [vendorId, setVendorId] = useState<number | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
 
-  const [form, setForm] = useState<Service>({
-    id: 0,
-    name: "",
-    category: "",
-    eventType: "",
-    basePrice: 0,
-    description: "",
-    packages: [{ packageName: "", price: 0, duration: "", features: [""] }],
-    availability: [""],
-    location: "",
-    portfolioImages: [""],
-    isActive: true,
-    vendor_id: 0
-  })
+  useEffect(() => {
+    const u = JSON.parse(localStorage.getItem("user") || "{}")
+    setVendorId(u?.id || null)
+  }, [])
 
-  // ✅ Fetch current vendor ID from backend
-  // ✅ Fetch current vendor ID from backend - UPDATE THIS FUNCTION
-const fetchCurrentVendor = async () => {
-  try {
-    // Get token from localStorage (ya jahan bhi store kiya hai)
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    
-    if (!token) {
-      console.warn("No token found, user might not be logged in");
-      return null;
-    }
+  useEffect(() => {
+    if (vendorId) fetchServices()
+  }, [vendorId])
 
-    const response = await fetch(`${API_BASE}/api/auth/me`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    if (response.ok) {
-      const vendorData = await response.json();
-      console.log("📋 Vendor data received:", vendorData);
-      
-      if (vendorData && vendorData.id) {
-        setVendorId(vendorData.id);
-        return vendorData.id;
-      } else {
-        console.warn("Vendor ID not found in response");
-      }
-    } else {
-      console.warn("Auth endpoint failed, status:", response.status);
-      // Agar unauthorized (401) hai to user login nahi hai
-      if (response.status === 401) {
-        console.warn("User not authenticated, redirect to login");
-        // Yahan aap login page redirect kar sakte hain
-      }
-    }
-  } catch (error) {
-    console.error("Error fetching vendor:", error);
-  }
-  
-  return null;
-};
-
-  // ✅ Fetch services with vendor ID
+  // GET /api/vendor/services?vendor_id=X (no JWT required)
   const fetchServices = async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      const currentVendorId = await fetchCurrentVendor()
-      if (!currentVendorId) {
-        console.error("Vendor ID not found")
-        return
-      }
-
-      const response = await fetch(`${API_BASE}/api/vendor/services?vendor_id=${currentVendorId}`)
-      if (response.ok) {
-        const data = await response.json()
-        setServices(data)
+      const res = await fetch(`http://localhost:5000/api/vendor/services?vendor_id=${vendorId}`)
+      if (res.ok) {
+        const d = await res.json()
+        setServices(Array.isArray(d) ? d : [])
       } else {
-        console.error("Error fetching services")
+        toast.error("Failed to load services")
       }
-    } catch (error) {
-      console.error("Error fetching services:", error)
+    } catch {
+      toast.error("Network error loading services")
     } finally {
       setLoading(false)
     }
   }
 
-  // ✅ Load services on component mount
-  useEffect(() => {
-    fetchServices()
-  }, [])
-
-  // ✅ Update vendor_id when vendorId changes
-  useEffect(() => {
-    if (vendorId) {
-      setForm(prev => ({ ...prev, vendor_id: vendorId }))
-    }
-  }, [vendorId])
-
-  // ✅ Reset form function
-  const resetForm = () => ({
-    id: 0,
-    name: "",
-    category: "",
-    eventType: "",
-    basePrice: 0,
-    description: "",
-    packages: [{ packageName: "", price: 0, duration: "", features: [""] }],
-    availability: [""],
-    location: "",
-    portfolioImages: [""],
-    isActive: true,
-    vendor_id: vendorId || 0
-  })
-
-  // ✅ Save service to backend - UPDATED
-  const saveService = async (serviceData: Service): Promise<boolean> => {
-    try {
-      // ✅ Ensure vendor_id is set before saving
-      const currentVendorId = vendorId || await fetchCurrentVendor()
-      if (!currentVendorId) {
-        console.error("Vendor ID not found")
-        return false
-      }
-
-      // ✅ Create final data with guaranteed vendor_id
-      const finalData = {
-        ...serviceData,
-        vendor_id: currentVendorId
-      }
-
-      const method = finalData.id ? 'PUT' : 'POST'
-      const url = finalData.id
-        ? `${API_BASE}/api/vendor/services/${finalData.id}`
-        : `${API_BASE}/api/vendor/services`
-
-      console.log('📤 Sending data:', finalData)
-
-      const response = await fetch(url, {
-        method: method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(finalData)
-      })
-
-      if (response.ok) {
-        const result = await response.json()
-        console.log('✅ Service saved:', result)
-        await fetchServices()
-        return true
-      } else {
-        const error = await response.json()
-        console.error('❌ Server error:', error)
-        return false
-      }
-    } catch (error) {
-      console.error('❌ Network error:', error)
-      return false
-    }
+  const openAdd = () => {
+    setEditingId(null)
+    setForm(emptyForm)
+    setDialogOpen(true)
   }
 
-  // ✅ Delete service from backend
-  const deleteService = async (serviceId: number): Promise<boolean> => {
-    try {
-      const response = await fetch(`${API_BASE}/api/vendor/services/${serviceId}`, {
-        method: 'DELETE'
-      })
-
-      if (response.ok) {
-        await fetchServices()
-        return true
-      } else {
-        console.error("Error deleting service")
-        return false
-      }
-    } catch (error) {
-      console.error("Error deleting service:", error)
-      return false
-    }
-  }
-
-  // ✅ Toggle service status in backend
-  const toggleServiceStatus = async (serviceId: number, currentStatus: boolean): Promise<boolean> => {
-    try {
-      const response = await fetch(`${API_BASE}/api/vendor/services/${serviceId}/toggle`, {
-        method: 'PATCH'
-      })
-
-      if (response.ok) {
-        await fetchServices()
-        return true
-      } else {
-        console.error("Error toggling service status")
-        return false
-      }
-    } catch (error) {
-      console.error("Error toggling service status:", error)
-      return false
-    }
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!form.name || !form.category || !form.eventType || !form.basePrice || !form.description || !form.location) {
-      alert("Please fill all required fields")
-      return
-    }
-
-    // ✅ Ensure vendor_id is available
-    if (!form.vendor_id) {
-      const currentVendorId = await fetchCurrentVendor()
-      if (!currentVendorId) {
-        alert("Vendor ID not found. Please try again.")
-        return
-      }
-      setForm(prev => ({ ...prev, vendor_id: currentVendorId }))
-    }
-
-    const success = await saveService(form)
-
-    if (success) {
-      setForm(resetForm())
-      setIsEditing(false)
-      alert(isEditing ? "Service updated successfully!" : "Service added successfully!")
-    } else {
-      alert("Error saving service. Please try again.")
-    }
-  }
-
-  const handleEdit = (service: Service) => {
-    setForm(service)
-    setIsEditing(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  const handleDelete = async (id: number) => {
-    if (confirm("Are you sure you want to delete this service?")) {
-      const success = await deleteService(id)
-      if (success) {
-        alert("Service deleted successfully!")
-      } else {
-        alert("Error deleting service. Please try again.")
-      }
-    }
-  }
-
-  const handleToggleStatus = async (id: number, currentStatus: boolean) => {
-    const success = await toggleServiceStatus(id, currentStatus)
-    if (!success) {
-      alert("Error updating service status. Please try again.")
-    }
-  }
-
-  // ✅ Add package to form
-  const addPackage = () => {
+  const openEdit = (service: any) => {
+    setEditingId(service.id)
     setForm({
-      ...form,
-      packages: [
-        ...form.packages,
-        { packageName: "", price: 0, duration: "", features: [""] }
-      ]
+      name: service.name || "",
+      category: service.category || "",
+      eventType: service.eventType || "",
+      basePrice: service.basePrice || 0,
+      description: service.description || "",
+      location: service.location || "",
+      packages: service.packages?.length
+        ? service.packages.map((p: any) => ({
+          packageName: p.packageName || "",
+          price: p.price || 0,
+          duration: p.duration || "",
+          features: p.features || [],
+        }))
+        : [{ packageName: "", price: 0, duration: "", features: [] }],
+    })
+    setDialogOpen(true)
+  }
+
+  // POST /api/vendor/services — requires vendor_id in body
+  // PUT /api/vendor/services/<id>
+  const handleSave = async () => {
+    if (!form.name.trim()) { toast.error("Service name is required"); return }
+    if (!form.category.trim()) { toast.error("Category is required"); return }
+    if (!form.eventType.trim()) { toast.error("Event type is required"); return }
+    if (!form.basePrice || form.basePrice <= 0) { toast.error("Base price must be greater than 0"); return }
+
+    setSaving(true)
+    try {
+      const payload = editingId
+        ? { ...form }
+        : { ...form, vendor_id: vendorId }
+
+      const url = editingId
+        ? `http://localhost:5000/api/vendor/services/${editingId}`
+        : "http://localhost:5000/api/vendor/services"
+      const method = editingId ? "PUT" : "POST"
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+
+      if (res.ok) {
+        toast.success(editingId ? "Service updated!" : "Service created!")
+        setDialogOpen(false)
+        fetchServices()
+      } else {
+        const d = await res.json()
+        toast.error(d.error || "Failed to save service")
+      }
+    } catch {
+      toast.error("Network error")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // PATCH /api/vendor/services/<id>/toggle
+  const handleToggle = async (id: number) => {
+    setTogglingId(id)
+    try {
+      const res = await fetch(`http://localhost:5000/api/vendor/services/${id}/toggle`, {
+        method: "PATCH",
+      })
+      if (res.ok) {
+        const d = await res.json()
+        setServices((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, isActive: d.isActive } : s))
+        )
+        toast.success("Service status updated")
+      } else {
+        toast.error("Failed to toggle service")
+      }
+    } catch {
+      toast.error("Network error")
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  // DELETE /api/vendor/services/<id>
+  const handleDelete = async (id: number) => {
+    if (!confirm("Are you sure you want to delete this service?")) return
+    setDeletingId(id)
+    try {
+      const res = await fetch(`http://localhost:5000/api/vendor/services/${id}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        setServices((prev) => prev.filter((s) => s.id !== id))
+        toast.success("Service deleted")
+      } else {
+        toast.error("Failed to delete service")
+      }
+    } catch {
+      toast.error("Network error")
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const updatePackage = (index: number, field: string, value: string | number) => {
+    setForm((prev) => {
+      const packages = [...prev.packages]
+      packages[index] = { ...packages[index], [field]: value }
+      return { ...prev, packages }
     })
   }
 
-  // ✅ Update package in form
-  const updatePackage = (index: number, field: string, value: any) => {
-    const updatedPackages = [...form.packages]
-    updatedPackages[index] = { ...updatedPackages[index], [field]: value }
-    setForm({ ...form, packages: updatedPackages })
+  const addPackage = () => {
+    setForm((prev) => ({
+      ...prev,
+      packages: [...prev.packages, { packageName: "", price: 0, duration: "", features: [] }],
+    }))
   }
 
-  // ✅ Remove package from form
   const removePackage = (index: number) => {
-    if (form.packages.length > 1) {
-      const updatedPackages = form.packages.filter((_, i) => i !== index)
-      setForm({ ...form, packages: updatedPackages })
-    }
+    setForm((prev) => ({
+      ...prev,
+      packages: prev.packages.filter((_, i) => i !== index),
+    }))
   }
 
   if (loading) {
     return (
       <VendorLayout>
-        <div className="flex justify-center items-center h-64">
-          <div className="text-lg">Loading services...</div>
+        <div className="flex h-[70vh] items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="h-10 w-10 text-purple-600 animate-spin" />
+            <p className="text-slate-500 font-medium animate-pulse">Loading your services...</p>
+          </div>
         </div>
       </VendorLayout>
     )
@@ -330,279 +237,348 @@ const fetchCurrentVendor = async () => {
 
   return (
     <VendorLayout>
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">My Services</h1>
-          <p className="text-muted-foreground">Manage your event services and packages for Eventify platform.</p>
+      <div className="space-y-8">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">My Services</h1>
+            <p className="text-slate-500 mt-1">
+              Manage the services and packages you offer to event organizers.
+            </p>
+          </div>
+          <Button
+            onClick={openAdd}
+            className="bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-100 rounded-xl self-start md:self-auto"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Service
+          </Button>
         </div>
 
-        {/* Add Service Form */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-purple-600">
-              {isEditing ? "Edit Service" : "Add New Service"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="name">Service Name *</Label>
-                <Input
-                  id="name"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Premium Wedding Photography"
-                  required
+        {/* Services Grid */}
+        {services.length > 0 ? (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {services.map((service) => (
+              <Card
+                key={service.id}
+                className={`group border-slate-200/60 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden ${!service.isActive ? "opacity-60" : ""
+                  }`}
+              >
+                <div
+                  className={`h-1.5 ${service.isActive
+                      ? "bg-gradient-to-r from-purple-500 to-indigo-500"
+                      : "bg-slate-200"
+                    }`}
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="category">Service Category *</Label>
-                <Input
-                  id="category"
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  placeholder="e.g. Photography, Catering, Decoration"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="eventType">Event Type *</Label>
-                <Select value={form.eventType} onValueChange={(value) => setForm({ ...form, eventType: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select event type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Wedding">Wedding</SelectItem>
-                    <SelectItem value="Conference">Conference</SelectItem>
-                    <SelectItem value="Corporate">Corporate</SelectItem>
-                    <SelectItem value="Workshop">Workshop</SelectItem>
-                    <SelectItem value="Birthday">Birthday</SelectItem>
-                    <SelectItem value="Concert">Concert</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="basePrice">Base Price (PKR) *</Label>
-                <Input
-                  id="basePrice"
-                  type="number"
-                  value={form.basePrice}
-                  onChange={(e) => setForm({ ...form, basePrice: Number(e.target.value) })}
-                  placeholder="e.g. 35000"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="location">Service Location *</Label>
-                <Input
-                  id="location"
-                  value={form.location}
-                  onChange={(e) => setForm({ ...form, location: e.target.value })}
-                  placeholder="e.g. Lahore, Pakistan"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="description">Service Description *</Label>
-                <Textarea
-                  id="description"
-                  rows={3}
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Describe your service in detail including what's included..."
-                  required
-                />
-              </div>
-
-              {/* Packages Section */}
-              <div className="md:col-span-2 space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label>Service Packages</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={addPackage}>
-                    <PlusCircle className="h-4 w-4 mr-1" /> Add Package
-                  </Button>
-                </div>
-
-                {form.packages.map((pkg, index) => (
-                  <div key={index} className="border rounded-lg p-4 space-y-3">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label>Package Name</Label>
-                        <Input
-                          value={pkg.packageName}
-                          onChange={(e) => updatePackage(index, 'packageName', e.target.value)}
-                          placeholder="e.g. Basic Package"
-                        />
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-purple-50 group-hover:bg-purple-100 transition-colors">
+                        <Briefcase className="h-4 w-4 text-purple-600" />
                       </div>
-                      <div>
-                        <Label>Price (PKR)</Label>
+                      <CardTitle className="text-base font-bold text-slate-900">
+                        {service.name}
+                      </CardTitle>
+                    </div>
+                    <Badge
+                      className={`border-none text-[10px] font-bold uppercase shrink-0 ${service.isActive
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-500"
+                        }`}
+                    >
+                      {service.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {service.description && (
+                    <p className="text-sm text-slate-500 leading-relaxed line-clamp-2">
+                      {service.description}
+                    </p>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {service.category && (
+                      <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                        <Tag className="h-3 w-3 text-slate-400" />
+                        {service.category} · {service.eventType}
+                      </p>
+                    )}
+                    {service.location && (
+                      <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                        <MapPin className="h-3 w-3 text-slate-400" />
+                        {service.location}
+                      </p>
+                    )}
+                    <p className="text-xs font-semibold text-purple-600 flex items-center gap-1">
+                      <DollarSign className="h-3 w-3" />
+                      Base Price: ${service.basePrice?.toLocaleString()}
+                    </p>
+                  </div>
+
+                  {/* Packages */}
+                  {service.packages?.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                        <Package className="h-3 w-3" />
+                        Packages ({service.packages.length})
+                      </p>
+                      <div className="space-y-1.5">
+                        {service.packages.map((pkg: any, i: number) => (
+                          <div
+                            key={i}
+                            className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2"
+                          >
+                            <span className="text-xs font-medium text-slate-700">{pkg.packageName}</span>
+                            <span className="text-xs font-bold text-purple-600 flex items-center">
+                              <DollarSign className="h-3 w-3" />
+                              {pkg.price?.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openEdit(service)}
+                      className="flex-1 rounded-xl border-slate-200 text-slate-600 hover:bg-slate-50 text-xs"
+                    >
+                      <Edit2 className="h-3 w-3 mr-1" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleToggle(service.id)}
+                      disabled={togglingId === service.id}
+                      className={`flex-1 rounded-xl text-xs ${service.isActive
+                          ? "border-amber-200 text-amber-600 hover:bg-amber-50"
+                          : "border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                        }`}
+                    >
+                      {togglingId === service.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : service.isActive ? (
+                        <ToggleRight className="h-3 w-3 mr-1" />
+                      ) : (
+                        <ToggleLeft className="h-3 w-3 mr-1" />
+                      )}
+                      {service.isActive ? "Deactivate" : "Activate"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDelete(service.id)}
+                      disabled={deletingId === service.id}
+                      className="rounded-xl border-red-100 text-red-500 hover:bg-red-50 text-xs px-3"
+                    >
+                      {deletingId === service.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-20 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+            <div className="w-16 h-16 rounded-full bg-purple-50 flex items-center justify-center mx-auto mb-4">
+              <Briefcase className="h-8 w-8 text-purple-300" />
+            </div>
+            <p className="text-slate-600 font-semibold text-lg">No services yet</p>
+            <p className="text-slate-400 text-sm mt-1 mb-6">
+              Add your first service to start getting booked by organizers.
+            </p>
+            <Button
+              onClick={openAdd}
+              className="bg-purple-600 hover:bg-purple-700 rounded-xl shadow-lg shadow-purple-100"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Your First Service
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Add/Edit Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-900">
+              {editingId ? "Edit Service" : "Add New Service"}
+            </DialogTitle>
+            <DialogDescription className="text-slate-500">
+              {editingId
+                ? "Update your service details and packages."
+                : "Fill in the details for your new service offering."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 pt-2">
+            {/* Name */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-semibold text-slate-700">Service Name *</Label>
+              <Input
+                placeholder="e.g. Wedding Photography"
+                value={form.name}
+                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                className="rounded-xl border-slate-200"
+              />
+            </div>
+
+            {/* Category + Event Type */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-semibold text-slate-700">Category *</Label>
+                <Input
+                  placeholder="e.g. Photography"
+                  value={form.category}
+                  onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
+                  className="rounded-xl border-slate-200"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-semibold text-slate-700">Event Type *</Label>
+                <Input
+                  placeholder="e.g. Wedding, Corporate"
+                  value={form.eventType}
+                  onChange={(e) => setForm((p) => ({ ...p, eventType: e.target.value }))}
+                  className="rounded-xl border-slate-200"
+                />
+              </div>
+            </div>
+
+            {/* Base Price + Location */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-semibold text-slate-700">Base Price ($) *</Label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={form.basePrice || ""}
+                    onChange={(e) => setForm((p) => ({ ...p, basePrice: parseFloat(e.target.value) || 0 }))}
+                    className="pl-9 rounded-xl border-slate-200"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-semibold text-slate-700">Location</Label>
+                <Input
+                  placeholder="e.g. New York, NY"
+                  value={form.location}
+                  onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+                  className="rounded-xl border-slate-200"
+                />
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-semibold text-slate-700">Description</Label>
+              <Textarea
+                placeholder="Describe what this service includes..."
+                value={form.description}
+                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                className="rounded-xl border-slate-200 resize-none"
+                rows={3}
+              />
+            </div>
+
+            {/* Packages */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold text-slate-700">Packages</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={addPackage}
+                  className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg text-xs"
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add Package
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {form.packages.map((pkg, i) => (
+                  <div key={i} className="bg-slate-50 rounded-xl p-4 space-y-3 border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        Package {i + 1}
+                      </span>
+                      {form.packages.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                          onClick={() => removePackage(i)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <Input
+                      placeholder="Package name (e.g. Basic, Premium)"
+                      value={pkg.packageName}
+                      onChange={(e) => updatePackage(i, "packageName", e.target.value)}
+                      className="rounded-lg border-slate-200 bg-white text-sm"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="relative">
+                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                         <Input
                           type="number"
-                          value={pkg.price}
-                          onChange={(e) => updatePackage(index, 'price', Number(e.target.value))}
-                          placeholder="e.g. 20000"
+                          placeholder="Price"
+                          value={pkg.price || ""}
+                          onChange={(e) => updatePackage(i, "price", parseFloat(e.target.value) || 0)}
+                          className="pl-9 rounded-lg border-slate-200 bg-white text-sm"
                         />
                       </div>
-                    </div>
-
-                    <div>
-                      <Label>Duration</Label>
                       <Input
+                        placeholder="Duration (e.g. 4 hours)"
                         value={pkg.duration}
-                        onChange={(e) => updatePackage(index, 'duration', e.target.value)}
-                        placeholder="e.g. 4 hours, Full Day"
+                        onChange={(e) => updatePackage(i, "duration", e.target.value)}
+                        className="rounded-lg border-slate-200 bg-white text-sm"
                       />
                     </div>
-
-                    <div>
-                      <Label>Features (one per line)</Label>
-                      <Textarea
-                        value={pkg.features.join('\n')}
-                        onChange={(e) => updatePackage(index, 'features', e.target.value.split('\n'))}
-                        placeholder="200 edited photos&#10;Online gallery&#10;1 photographer"
-                        rows={3}
-                      />
-                    </div>
-
-                    {form.packages.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => removePackage(index)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-1" /> Remove Package
-                      </Button>
-                    )}
                   </div>
                 ))}
               </div>
+            </div>
 
-              <div className="md:col-span-2 flex justify-end gap-4">
-                {isEditing && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setIsEditing(false)
-                      setForm(resetForm())
-                    }}
-                  >
-                    Cancel Edit
-                  </Button>
-                )}
-                <Button
-                  type="submit"
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-6"
-                >
-                  {isEditing ? "Update Service" : "Add Service"}
-                  {!isEditing && <PlusCircle className="h-4 w-4 ml-2" />}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Service List */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
-          {services.map((service) => (
-            <Card key={service.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-purple-500">
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="text-lg">{service.name}</CardTitle>
-                    <div className="flex gap-2 mt-1">
-                      <span className="text-sm bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
-                        {service.category}
-                      </span>
-                      <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                        {service.eventType}
-                      </span>
-                    </div>
-                  </div>
-                  <div className={`px-2 py-1 rounded text-xs font-medium ${service.isActive
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-red-100 text-red-800'
-                    }`}>
-                    {service.isActive ? 'Active' : 'Inactive'}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-gray-700">{service.description}</p>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <MapPin className="h-4 w-4 text-purple-600" />
-                    <span>{service.location}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-purple-600" />
-                    <span>Base Price: PKR {service.basePrice.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <h4 className="font-semibold text-sm">Packages:</h4>
-                  {service.packages.map((pkg, index) => (
-                    <div key={index} className="bg-gray-50 p-3 rounded">
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium">{pkg.packageName}</span>
-                        <span className="text-purple-600 font-bold">PKR {pkg.price.toLocaleString()}</span>
-                      </div>
-                      <p className="text-xs text-gray-600">{pkg.duration}</p>
-                      <ul className="text-xs text-gray-700 mt-1">
-                        {pkg.features.map((feature, idx) => (
-                          <li key={idx}>• {feature}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex justify-between gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleToggleStatus(service.id, service.isActive)}
-                  >
-                    {service.isActive ? 'Deactivate' : 'Activate'}
-                  </Button>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => handleEdit(service)}>
-                      <Pencil className="h-4 w-4 mr-1" /> Edit
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDelete(service.id)}
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" /> Delete
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {services.length === 0 && (
-          <Card>
-            <CardContent className="text-center py-12">
-              <div className="text-gray-400 mb-4">
-                <PlusCircle className="h-16 w-16 mx-auto" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-600 mb-2">No Services Added</h3>
-              <p className="text-gray-500">Start by adding your first service to get bookings on Eventify.</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+            {/* Actions */}
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+                className="flex-1 rounded-xl border-slate-200"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 rounded-xl"
+              >
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                {editingId ? "Save Changes" : "Create Service"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </VendorLayout>
   )
 }

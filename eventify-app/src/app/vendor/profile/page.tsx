@@ -58,17 +58,22 @@ export default function VendorProfilePage() {
     }
 
     setUploading(true)
-    
+
     const reader = new FileReader()
     reader.onloadend = async () => {
       try {
         const token = localStorage.getItem("token")
+        if (!token) {
+          router.push("/login")
+          return
+        }
+        const cleanToken = token.replace(/['"]+/g, '').trim()
         const base64Data = reader.result as string
 
         const response = await fetch("http://localhost:5000/api/auth/profile/upload-image", {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${token}`,
+            "Authorization": `Bearer ${cleanToken}`,
             "Content-Type": "application/json"
           },
           body: JSON.stringify({ image_data: base64Data })
@@ -89,12 +94,12 @@ export default function VendorProfilePage() {
         setUploading(false)
       }
     }
-    
+
     reader.onerror = () => {
       setUploading(false)
       alert("Error reading file")
     }
-    
+
     reader.readAsDataURL(file)
   }
 
@@ -104,10 +109,15 @@ export default function VendorProfilePage() {
 
     try {
       const token = localStorage.getItem("token")
+      if (!token) {
+        router.push("/login")
+        return
+      }
+      const cleanToken = token.replace(/['"]+/g, '').trim()
       const response = await fetch("http://localhost:5000/api/auth/profile/upload-image", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${token}`,
+          "Authorization": `Bearer ${cleanToken}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ image_data: null })
@@ -133,11 +143,20 @@ export default function VendorProfilePage() {
 
   const fetchUserProfile = async () => {
     try {
-      const token = localStorage.getItem("token")
+      let token = localStorage.getItem("token")
+      if (!token || token === "undefined" || token === "null") {
+        console.error("No valid token found")
+        router.push("/login")
+        return
+      }
+
+      // Clean token if it has quotes
+      const cleanToken = token.replace(/['"]+/g, '').trim()
+
       const response = await fetch("http://localhost:5000/api/auth/profile", {
         method: "GET",
         headers: {
-          "Authorization": `Bearer ${token}`,
+          "Authorization": `Bearer ${cleanToken}`,
           "Content-Type": "application/json"
         }
       })
@@ -145,8 +164,12 @@ export default function VendorProfilePage() {
       if (response.ok) {
         const data = await response.json()
         setUserData(data.user)
+      } else if (response.status === 401 || response.status === 422) {
+        console.error("Session invalid or expired")
+        handleLogout()
       } else {
-        console.error("Failed to fetch user profile")
+        const errorData = await response.json().catch(() => ({}))
+        console.error("Failed to fetch user profile:", errorData.error || response.statusText)
       }
     } catch (error) {
       console.error("Error fetching profile:", error)
@@ -159,10 +182,15 @@ export default function VendorProfilePage() {
     setSaving(true)
     try {
       const token = localStorage.getItem("token")
+      if (!token) {
+        router.push("/login")
+        return
+      }
+      const cleanToken = token.replace(/['"]+/g, '').trim()
       const response = await fetch("http://localhost:5000/api/auth/profile/update", {
         method: "PUT",
         headers: {
-          "Authorization": `Bearer ${token}`,
+          "Authorization": `Bearer ${cleanToken}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -247,8 +275,8 @@ export default function VendorProfilePage() {
               <div className="relative group">
                 <Avatar className="h-24 w-24 mb-4">
                   {userData.profile_image ? (
-                    <AvatarImage 
-                      src={userData.profile_image} 
+                    <AvatarImage
+                      src={userData.profile_image}
                       alt={userData.name}
                       className="object-cover"
                     />
@@ -257,7 +285,7 @@ export default function VendorProfilePage() {
                     {getInitials(userData.name)}
                   </AvatarFallback>
                 </Avatar>
-                
+
                 {/* Image Upload Controls */}
                 {isEditing && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
@@ -282,7 +310,7 @@ export default function VendorProfilePage() {
                   </div>
                 )}
               </div>
-              
+
               {/* Hidden file input */}
               <input
                 id="profile-image"
@@ -292,7 +320,7 @@ export default function VendorProfilePage() {
                 className="hidden"
                 disabled={uploading || !isEditing}
               />
-              
+
               {uploading && (
                 <p className="text-sm text-muted-foreground">Uploading image...</p>
               )}

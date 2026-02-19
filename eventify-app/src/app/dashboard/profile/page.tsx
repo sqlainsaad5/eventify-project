@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { User, Mail, Phone, MapPin, LogOut } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { User, Mail, Phone, MapPin, LogOut, Camera } from "lucide-react"
 
 interface UserData {
   id: string;
@@ -17,6 +17,7 @@ interface UserData {
   city: string;
   role: string;
   category: string;
+  profile_image?: string;
 }
 
 export default function OrganizerProfilePage() {
@@ -31,8 +32,10 @@ export default function OrganizerProfilePage() {
     phone: "",
     city: "",
     role: "",
-    category: ""
+    category: "",
+    profile_image: ""
   })
+  const [uploading, setUploading] = useState(false)
 
   // Fetch user data on component mount
   useEffect(() => {
@@ -64,10 +67,85 @@ export default function OrganizerProfilePage() {
     }
   }
 
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file')
+      return
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Image size should be less than 2MB')
+      return
+    }
+
+    setUploading(true)
+    const reader = new FileReader()
+    reader.onloadend = async () => {
+      try {
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
+        const base64Data = reader.result as string
+
+        const response = await fetch("http://localhost:5000/api/auth/profile/upload-image", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ image_data: base64Data })
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          setUserData(data.user)
+          alert("Profile image updated successfully!")
+        } else {
+          const errorData = await response.json()
+          alert(`Upload failed: ${errorData.error}`)
+        }
+      } catch (error) {
+        console.error("Error uploading image:", error)
+        alert("Failed to upload image. Please try again.")
+      } finally {
+        setUploading(false)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleRemoveImage = async () => {
+    if (!confirm("Are you sure you want to remove your profile image?")) return
+
+    try {
+      const token = localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
+      const response = await fetch("http://localhost:5000/api/auth/profile/upload-image", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ image_data: null })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setUserData(data.user)
+        alert("Profile image removed successfully!")
+      } else {
+        alert("Failed to remove image")
+      }
+    } catch (error) {
+      console.error("Error removing image:", error)
+      alert("Failed to remove image. Please try again.")
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
-      const token = localStorage.getItem("token")
+      const token = localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
 
       const response = await fetch("http://localhost:5000/api/auth/profile/update", {
         method: "PUT",
@@ -154,16 +232,47 @@ export default function OrganizerProfilePage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-col items-center mb-8">
-              <Avatar className="h-24 w-24 mb-4">
-                <AvatarFallback className="bg-primary text-primary-foreground text-2xl">
-                  {getInitials(userData.name)}
-                </AvatarFallback>
-              </Avatar>
-              {isEditing && (
-                <Button variant="outline" size="sm">
-                  Change Photo
-                </Button>
-              )}
+              <div className="relative group">
+                <Avatar className="h-24 w-24 mb-4">
+                  {userData.profile_image ? (
+                    <AvatarImage src={userData.profile_image} className="object-cover" />
+                  ) : null}
+                  <AvatarFallback className="bg-primary text-primary-foreground text-2xl">
+                    {getInitials(userData.name)}
+                  </AvatarFallback>
+                </Avatar>
+
+                {isEditing && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="profile-image-upload" className="cursor-pointer">
+                        <div className="bg-white p-2 rounded-full hover:bg-gray-100 transition-colors">
+                          <Camera className="h-4 w-4 text-gray-700" />
+                        </div>
+                      </Label>
+                      {userData.profile_image && (
+                        <button
+                          onClick={handleRemoveImage}
+                          className="bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors"
+                          title="Remove Photo"
+                        >
+                          <LogOut className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <input
+                id="profile-image-upload"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageUpload}
+                disabled={uploading || !isEditing}
+              />
+              {uploading && <p className="text-xs text-muted-foreground mt-2">Uploading...</p>}
             </div>
 
             <div className="space-y-6">

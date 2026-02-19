@@ -1,7 +1,7 @@
 # app/routes/services.py - FIXED IMPORTS
 from flask import Blueprint, request, jsonify
 from app.extensions import db
-from app.models import Service, ServicePackage, User  # ✅ Correct import
+from app.models import Service, ServicePackage, User, Event  # ✅ Correct import
 import json
 
 services_bp = Blueprint('services', __name__)
@@ -84,6 +84,23 @@ def create_service():
         db.session.commit()
         print("✅ Service and packages saved to database")
         
+        # Notify Organizers linked to this vendor
+        try:
+            from app.api.payments import create_notification
+            vendor = User.query.get(vendor_id)
+            if vendor:
+                organizer_ids = set([event.user_id for event in vendor.assigned_events])
+                for org_id in organizer_ids:
+                    create_notification(
+                        org_id,
+                        "🆕 New Service Added",
+                        f"Vendor '{vendor.name}' added a new service: {service.name}",
+                        "service_update",
+                        {"vendor_id": vendor_id}
+                    )
+        except Exception as e:
+            print(f"❌ Notification failed: {e}")
+        
         return jsonify({
             "message": "Service created successfully", 
             "service": service.to_dict()
@@ -139,6 +156,24 @@ def update_service(service_id):
                 continue
         
         db.session.commit()
+        
+        # Notify Organizers linked to this vendor
+        try:
+            from app.api.payments import create_notification
+            vendor = User.query.get(service.vendor_id)
+            if vendor:
+                organizer_ids = set([event.user_id for event in vendor.assigned_events])
+                for org_id in organizer_ids:
+                    create_notification(
+                        org_id,
+                        "📝 Service Updated",
+                        f"Vendor '{vendor.name}' updated their service: {service.name}",
+                        "service_update",
+                        {"vendor_id": service.vendor_id}
+                    )
+        except Exception as e:
+            print(f"❌ Notification failed: {e}")
+            
         return jsonify({
             "message": "Service updated successfully", 
             "service": service.to_dict()

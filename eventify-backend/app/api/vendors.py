@@ -55,6 +55,19 @@ def assign_vendor():
         vendor.assigned_events.append(event)
         db.session.commit()
 
+        # Notify Vendor
+        try:
+            from app.api.payments import create_notification
+            create_notification(
+                vendor_id,
+                "🎉 New Event Assignment",
+                f"You have been assigned to the event '{event.name}'.",
+                "info",
+                {"event_id": event_id}
+            )
+        except Exception as e:
+            print(f"Assign notification failed: {e}")
+
         return jsonify({
             "message": f"✅ Vendor '{vendor.name}' successfully assigned to '{event.name}'",
             "assigned_events_count": len(vendor.assigned_events)
@@ -83,6 +96,20 @@ def unassign_vendor():
         if event in vendor.assigned_events:
             vendor.assigned_events.remove(event)
             db.session.commit()
+            
+            # Notify Vendor
+            try:
+                from app.api.payments import create_notification
+                create_notification(
+                    vendor_id,
+                    "⚠️ Event Assignment Removed",
+                    f"You have been removed from the event '{event.name}'.",
+                    "warning",
+                    {"event_id": event_id}
+                )
+            except Exception as e:
+                print(f"Unassign notification failed: {e}")
+                
             return jsonify({
                 "message": f"✅ Vendor '{vendor.name}' unassigned from '{event.name}'",
                 "assigned_events_count": len(vendor.assigned_events)
@@ -214,6 +241,19 @@ def mark_event_completed(event_id):
         # ✅ Add to completed events
         vendor.completed_events.append(event)
         db.session.commit()
+        
+        # Notify Organizer
+        try:
+            from app.api.payments import create_notification
+            create_notification(
+                event.user_id,
+                "✅ Event Task Completed",
+                f"Vendor '{vendor.name}' has marked their work for '{event.name}' as completed.",
+                "success",
+                {"event_id": event.id, "vendor_id": vendor.id}
+            )
+        except Exception as e:
+            print(f"Completion notification failed: {e}")
         
         print(f"✅ Event {event_id} marked as completed for vendor {current_user_id}")
         

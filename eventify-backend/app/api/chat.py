@@ -37,6 +37,20 @@ def send_message():
         db.session.add(chat_message)
         db.session.commit()
         
+        # Trigger Notification
+        try:
+            from app.api.payments import create_notification
+            sender = User.query.get(current_user_id)
+            create_notification(
+                receiver_id,
+                "New Message 💬",
+                f"From {sender.name}: {message[:50]}...",
+                "chat",
+                {"sender_id": current_user_id, "event_id": event_id}
+            )
+        except Exception as notify_err:
+            print(f"Notification trigger failed: {str(notify_err)}")
+
         return jsonify({
             "message": "Message sent successfully",
             "chat_message": chat_message.to_dict()
@@ -219,43 +233,52 @@ def mark_messages_read():
         print(f"Error marking messages as read: {str(e)}")
         return jsonify({"error": "Failed to mark messages as read"}), 500
 
-# ✅ Get conversation between two users for an event
-@chat_bp.route("/conversation/<int:event_id>/<int:other_user_id>", methods=["GET"])
+# ✅ Get full conversation between two users across ALL their events
+@chat_bp.route("/full-conversation/<int:other_user_id>", methods=["GET"])
 @jwt_required()
-def get_conversation(event_id, other_user_id):
+def get_full_conversation(other_user_id):
     try:
         current_user_id = get_jwt_identity()
         
-        # Verify access to event
-        event = Event.query.get(event_id)
-        if not event:
-            return jsonify({"error": "Event not found"}), 404
-        
-        user = User.query.get(current_user_id)
-        has_access = False
-        
-        if user.role == 'organizer' and event.user_id == current_user_id:
-            has_access = True
-        elif user.role == 'vendor' and event in user.assigned_events:
-            has_access = True
-            
-        if not has_access:
-            return jsonify({"error": "Access denied"}), 403
-        
-        # Get messages between current user and other user for this event
+        # Get all messages between current user and other user across all events
         messages = ChatMessage.query.filter(
-            ChatMessage.event_id == event_id,
             or_(
                 and_(ChatMessage.sender_id == current_user_id, ChatMessage.receiver_id == other_user_id),
                 and_(ChatMessage.sender_id == other_user_id, ChatMessage.receiver_id == current_user_id)
             )
         ).order_by(ChatMessage.created_at.asc()).all()
         
+        # Group messages by event so frontend knows the context
+        events_involved = list(set([msg.event_id for msg in messages]))
+        events_data = {}
+        for eid in events_involved:
+            ev = Event.query.get(eid)
+            if ev:
+                events_data[eid] = ev.name
+
         return jsonify({
             "messages": [msg.to_dict() for msg in messages],
-            "event_name": event.name
+            "events_context": events_data
         }), 200
         
     except Exception as e:
-        print(f"Error fetching conversation: {str(e)}")
+        print(f"Error fetching full conversation: {str(e)}")
         return jsonify({"error": "Failed to fetch conversation"}), 500
+
+# ✅ Get unread messages count for current user
+@chat_bp.route("/unread-count", methods=["GET"])
+@jwt_required()
+def get_unread_count():
+    try:
+        current_user_id = get_jwt_identity()
+        
+        count = ChatMessage.query.filter_by(
+            receiver_id=current_user_id,
+            is_read=False
+        ).count()
+        
+        return jsonify({"unread_count": count}), 200
+        
+    except Exception as e:
+        print(f"Error fetching unread count: {str(e)}")
+        return jsonify({"error": "Failed to fetch unread count"}), 500

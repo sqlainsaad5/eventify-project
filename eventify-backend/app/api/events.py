@@ -156,6 +156,21 @@ def update_event(event_id):
                 setattr(event, field, data[field])
 
         db.session.commit()
+        
+        # Notify Assigned Vendors
+        try:
+            from app.api.payments import create_notification
+            for vendor in event.assigned_vendors.all():
+                create_notification(
+                    vendor.id,
+                    "📝 Event Updated",
+                    f"The event details for '{event.name}' have been updated.",
+                    "info",
+                    {"event_id": event.id}
+                )
+        except Exception as e:
+            print(f"Update event notification failed: {e}")
+            
         return jsonify({"message": "Event updated successfully", "event": event.to_dict()}), 200
 
     except Exception as e:
@@ -205,12 +220,28 @@ def delete_event(event_id):
         if not event:
             return jsonify({"error": "Event not found"}), 404
 
-        # ✅ Unassign all vendors (for dynamic relationship)
+        # ✅ Notify and Unassign all vendors
+        assigned_vendors_ids = [v.id for v in event.assigned_vendors.all()]
+        event_name = event.name
+        
         for vendor in event.assigned_vendors.all():
             event.assigned_vendors.remove(vendor)
 
         db.session.delete(event)
         db.session.commit()
+        
+        # Notify them after commit
+        try:
+            from app.api.payments import create_notification
+            for vid in assigned_vendors_ids:
+                create_notification(
+                    vid,
+                    "🚫 Event Cancelled",
+                    f"The event '{event_name}' has been deleted/cancelled by the organizer.",
+                    "warning"
+                )
+        except Exception as e:
+            print(f"Delete event notification failed: {e}")
 
         return jsonify({"message": "Event deleted successfully"}), 200
 

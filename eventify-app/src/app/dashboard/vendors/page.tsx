@@ -1,7 +1,8 @@
 "use client";
 
 import { DashboardLayout } from "@/components/dashboard-layout";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useSearchParams, usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -75,6 +76,8 @@ interface Conversation {
   last_message_time: string;
   unread_count: number;
   assigned_events: { id: number; name: string }[];
+  event_id?: number;
+  event_name?: string;
 }
 
 interface Service {
@@ -117,6 +120,20 @@ const useDebounce = (value: any, delay: number) => {
 };
 
 export default function VendorsPage() {
+  return (
+    <Suspense fallback={
+      <DashboardLayout>
+        <div className="flex h-[70vh] items-center justify-center">
+          <Loader2 className="h-10 w-10 text-purple-600 animate-spin" />
+        </div>
+      </DashboardLayout>
+    }>
+      <VendorsPageContent />
+    </Suspense>
+  );
+}
+
+function VendorsPageContent() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [filtered, setFiltered] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,7 +160,43 @@ export default function VendorsPage() {
   const [chatDialogOpen, setChatDialogOpen] = useState(false);
 
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
   const debouncedSearch = useDebounce(search, 300);
+
+  const initVendorId = searchParams.get("vendorId");
+  const openServices = searchParams.get("openServices");
+
+  const fetchVendorServices = useCallback(async (vendorId: number) => {
+    setServicesLoading(true);
+    try {
+      const response = await fetch(`http://localhost:5000/api/vendor/services?vendor_id=${vendorId}`);
+      if (response.ok) {
+        const services = await response.json();
+        setSelectedVendorServices(services);
+      }
+    } catch (error) {
+      console.error("Error fetching services:", error);
+    } finally {
+      setServicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (openServices === "true" && initVendorId && vendors.length > 0 && !loading) {
+      const vid = parseInt(initVendorId);
+      const vendor = vendors.find(v => v.id === vid);
+      if (vendor) {
+        setCurrentVendorForServices(vendor);
+        setServicesDialogOpen(true);
+        fetchVendorServices(vid);
+        // Clear params
+        router.replace(pathname, { scroll: false });
+      }
+    }
+  }, [openServices, initVendorId, vendors, loading, router, pathname, fetchVendorServices]);
+
 
   const getOrganizerId = (): number | null => {
     if (typeof window === "undefined") return null;
@@ -215,20 +268,40 @@ export default function VendorsPage() {
     if (!organizerId || !token) return;
     setChatLoading(true);
     try {
-      const res = await fetch(`http://localhost:5000/api/chat/conversation/user/${vendorId}`, {
+      // ✅ Use the new full-conversation endpoint
+      const res = await fetch(`http://localhost:5000/api/chat/full-conversation/${vendorId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
         setChatMessages(data.messages || []);
-        await fetch("http://localhost:5000/api/chat/mark-read-vendor", {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ vendor_id: vendorId }),
-        });
+
+        // ✅ Clear chat notifications for this vendor
+        try {
+          fetch("http://localhost:5000/api/payments/notifications/clear-chat", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ sender_id: vendorId }),
+          });
+        } catch (clearErr) {
+          console.error("Failed to clear chat notifications:", clearErr);
+        }
+
+        // Mark as read - the backend now handles context better
+        // We can still try to mark as read if we have an event id
+        if (data.messages.length > 0) {
+          await fetch("http://localhost:5000/api/chat/mark-read", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ event_id: data.messages[data.messages.length - 1].event_id }),
+          });
+        }
         fetchOrganizerConversations();
       }
     } catch (err) {
@@ -238,8 +311,48 @@ export default function VendorsPage() {
     }
   }, [organizerId, token, fetchOrganizerConversations]);
 
+  useEffect(() => {
+    if (initVendorId && !openServices && vendors.length > 0 && !loading) {
+      const vid = parseInt(initVendorId);
+      const vendor = vendors.find(v => v.id === vid);
+      if (vendor) {
+        // Only open if not already open
+        if (!chatDialogOpen || (selectedConversation && selectedConversation.vendor_id !== vid)) {
+          const existingConv = conversations.find(c => c.vendor_id === vid);
+          if (existingConv) {
+            setSelectedConversation(existingConv);
+          } else {
+            setSelectedConversation({
+              vendor_id: vendor.id,
+              vendor_name: vendor.name,
+              vendor_email: vendor.email,
+              last_message: "",
+              last_message_time: "",
+              unread_count: 0,
+              assigned_events: vendor.assigned_events || []
+            });
+          }
+          setChatDialogOpen(true);
+          fetchChatMessages(vid);
+
+          // ✅ Clear URL params to allow closing the modal without auto-reopening
+          router.replace(pathname, { scroll: false });
+        }
+      }
+    }
+  }, [initVendorId, vendors, loading, conversations, fetchChatMessages, chatDialogOpen, selectedConversation, router, pathname, openServices]);
+
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation || !organizerId || !token) return;
+
+    // ✅ Backend REQUIRES an event_id. We'll use the first assigned event or any relevant one.
+    const eventId = selectedConversation.event_id || selectedConversation.assigned_events?.[0]?.id;
+
+    if (!eventId) {
+      toast({ title: "No Event Context", description: "You can only chat with vendors assigned to your events.", variant: "destructive" });
+      return;
+    }
+
     try {
       const res = await fetch("http://localhost:5000/api/chat/send", {
         method: "POST",
@@ -250,6 +363,7 @@ export default function VendorsPage() {
         body: JSON.stringify({
           receiver_id: selectedConversation.vendor_id,
           message: newMessage.trim(),
+          event_id: eventId, // ✅ Required field
         }),
       });
       if (res.ok) {
@@ -257,26 +371,15 @@ export default function VendorsPage() {
         setChatMessages((prev) => [...prev, data.chat_message]);
         setNewMessage("");
         fetchOrganizerConversations();
+      } else {
+        const errData = await res.json();
+        toast({ title: "Error", description: errData.error || "Failed to send", variant: "destructive" });
       }
     } catch (err) {
       console.error("Error sending message:", err);
     }
   };
 
-  const fetchVendorServices = async (vendorId: number) => {
-    setServicesLoading(true);
-    try {
-      const response = await fetch(`http://localhost:5000/api/vendor/services?vendor_id=${vendorId}`);
-      if (response.ok) {
-        const services = await response.json();
-        setSelectedVendorServices(services);
-      }
-    } catch (error) {
-      console.error("Error fetching services:", error);
-    } finally {
-      setServicesLoading(false);
-    }
-  };
 
   useEffect(() => {
     loadVendors();
@@ -471,10 +574,11 @@ export default function VendorsPage() {
                       <Button
                         variant="outline"
                         disabled={vendor.assigned_events_count === 0}
-                        className="rounded-xl h-10 border-slate-200 hover:bg-slate-50 hover:text-purple-600 group/btn"
+                        className="relative rounded-xl h-10 border-slate-200 hover:bg-slate-50 hover:text-purple-600 group/btn"
                         onClick={async () => {
                           await fetchChatMessages(vendor.id);
-                          setSelectedConversation({
+                          const conv = conversations.find(c => c.vendor_id === vendor.id);
+                          setSelectedConversation(conv || {
                             vendor_id: vendor.id,
                             vendor_name: vendor.name,
                             vendor_email: vendor.email,
@@ -487,6 +591,11 @@ export default function VendorsPage() {
                         }}
                       >
                         <MessageSquare className="h-4 w-4 group-hover/btn:scale-110 transition-transform" />
+                        {conversations.find(c => c.vendor_id === vendor.id)?.unread_count ? (
+                          <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-white animate-pulse">
+                            {conversations.find(c => c.vendor_id === vendor.id)?.unread_count}
+                          </span>
+                        ) : null}
                       </Button>
                     </div>
                   </CardContent>
@@ -567,6 +676,33 @@ export default function VendorsPage() {
                             }}
                           >
                             <ExternalLink className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={vendor.assigned_events_count === 0}
+                            className="relative h-9 w-9 p-0 rounded-xl hover:bg-white hover:shadow-md hover:text-purple-600 border border-transparent hover:border-slate-100 group/btn"
+                            onClick={async () => {
+                              await fetchChatMessages(vendor.id);
+                              const conv = conversations.find(c => c.vendor_id === vendor.id);
+                              setSelectedConversation(conv || {
+                                vendor_id: vendor.id,
+                                vendor_name: vendor.name,
+                                vendor_email: vendor.email,
+                                last_message: "",
+                                last_message_time: "",
+                                unread_count: 0,
+                                assigned_events: vendor.assigned_events || []
+                              });
+                              setChatDialogOpen(true);
+                            }}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            {conversations.find(c => c.vendor_id === vendor.id)?.unread_count ? (
+                              <span className="absolute -top-1 -right-1 h-3.5 w-3.5 bg-red-500 text-white text-[8px] font-bold flex items-center justify-center rounded-full border border-white animate-pulse">
+                                {conversations.find(c => c.vendor_id === vendor.id)?.unread_count}
+                              </span>
+                            ) : null}
                           </Button>
                         </div>
                       </td>
