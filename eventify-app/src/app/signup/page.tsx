@@ -1,21 +1,32 @@
 "use client"
 
-import { useState } from "react"
+import { useState, Suspense } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { User, Mail, Lock, Sparkles } from "lucide-react"
+import { User, Mail, Lock, Sparkles, CalendarDays, Building2, ShoppingBag, UserCircle } from "lucide-react"
 import { toast } from "sonner"
 
 export default function SignUpPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignUpInner />
+    </Suspense>
+  )
+}
+
+function SignUpInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const fromEventCTA = searchParams.get("from") === "event-cta"
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
     confirmPassword: "",
-    role: "organizer",
+    role: "organizer",   // always default to organizer
   })
   const [loading, setLoading] = useState(false)
 
@@ -71,10 +82,14 @@ export default function SignUpPage() {
       }
 
       if (formData.role === "organizer") {
-        router.push("/dashboard")
-      } else {
+        // If came from the event CTA, drop them straight into create-event
+        router.push(fromEventCTA ? "/dashboard/events/new" : "/dashboard")
+      } else if (formData.role === "vendor") {
         toast.info("Please contact admin for vendor verification.")
         router.push("/login")
+      } else {
+        // 'user' role → home page
+        router.push("/")
       }
 
     } catch (err: any) {
@@ -95,8 +110,27 @@ export default function SignUpPage() {
               </div>
               <span className="text-xl font-bold text-slate-900">Eventify</span>
             </div>
-            <h1 className="text-4xl font-black text-slate-900 mb-3 tracking-tighter">Join the Future.</h1>
-            <p className="text-slate-500 font-medium">Create your account to start planning your next big event.</p>
+
+            {/* CTA banner */}
+            {fromEventCTA && (
+              <div
+                className="flex items-center gap-3 p-4 rounded-2xl mb-6 text-white text-sm font-bold"
+                style={{ background: "linear-gradient(135deg,#6366f1,#a855f7,#ec4899)" }}
+              >
+                <CalendarDays className="h-5 w-5 shrink-0" />
+                <span>Almost there! Create your free account to submit your event details.</span>
+              </div>
+            )}
+
+            <h1 className="text-4xl font-black text-slate-900 mb-3 tracking-tighter">
+              {fromEventCTA ? "Create Your Account" : "Join the Future."}
+            </h1>
+            <p className="text-slate-500 font-medium">
+              {fromEventCTA
+                ? "Sign up as an organizer — it's free. We'll take you straight to your event."
+                : "Create your account to start planning your next big event."
+              }
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -144,22 +178,29 @@ export default function SignUpPage() {
               </div>
             </div>
 
-            <div className="space-y-1.5 px-1">
+            <div className="space-y-2 px-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">I am a...</label>
-              <div className="flex gap-4">
-                {["organizer", "vendor"].map((role) => (
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { role: "organizer", label: "Organizer", icon: <Building2 className="h-5 w-5" />, desc: "Plan & manage events" },
+                  { role: "vendor", label: "Vendor", icon: <ShoppingBag className="h-5 w-5" />, desc: "Offer services" },
+                  { role: "user", label: "User", icon: <UserCircle className="h-5 w-5" />, desc: "Attend & explore" },
+                ].map(({ role, label, icon, desc }) => (
                   <button
                     key={role}
                     type="button"
                     onClick={() => setFormData({ ...formData, role })}
                     className={cn(
-                      "flex-1 h-12 rounded-2xl text-sm font-bold capitalize transition-all border-2",
+                      "flex flex-col items-center gap-1.5 py-4 px-2 rounded-2xl text-sm font-bold capitalize transition-all border-2",
                       formData.role === role
                         ? "bg-purple-600 border-purple-600 text-white shadow-lg shadow-purple-100"
-                        : "bg-white border-slate-100 text-slate-400 hover:border-slate-200"
+                        : "bg-white border-slate-100 text-slate-400 hover:border-purple-200 hover:text-slate-600"
                     )}
                   >
-                    {role}
+                    {icon}
+                    <span className="text-xs font-black">{label}</span>
+                    <span className={`text-[9px] font-medium leading-tight text-center ${formData.role === role ? "text-purple-100" : "text-slate-400"
+                      }`}>{desc}</span>
                   </button>
                 ))}
               </div>

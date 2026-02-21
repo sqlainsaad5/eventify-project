@@ -99,8 +99,13 @@ class Event(db.Model):
 
     
 
-    # Foreign key linking event to user (organizer)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    organizer_status = db.Column(db.String(20), default="pending") # pending, accepted, rejected
+
+    # Relationships
+    creator = db.relationship('User', foreign_keys=[user_id], backref='events_created')
+    organizer = db.relationship('User', foreign_keys=[organizer_id], backref='events_organized')
 
     def to_dict(self):
         return {
@@ -113,6 +118,9 @@ class Event(db.Model):
             "image_url": self.image_url,
             "progress": self.progress,
             "user_id": self.user_id,
+            "organizer_id": self.organizer_id,
+            "organizer_name": self.organizer.name if self.organizer else None,
+            "organizer_status": self.organizer_status,
             "assigned_vendors": [vendor.name for vendor in self.assigned_vendors] if self.assigned_vendors else []
         }
 
@@ -213,7 +221,65 @@ class ChatMessage(db.Model):
         }
 
 
-        # ✅ SERVICE MODELS - ADD THESE AT THE END
+class OrganizerPaymentRequest(db.Model):
+    """Organizer requests payment from event owner (Phase 3 professional flow)."""
+    __tablename__ = "organizer_payment_request"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    currency = db.Column(db.String(10), default="USD")
+    description = db.Column(db.Text)
+    status = db.Column(db.String(20), default="pending")  # pending, paid, rejected
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    paid_at = db.Column(db.DateTime)
+    payment_id = db.Column(db.Integer, db.ForeignKey("payment.id"), nullable=True)
+
+    event = db.relationship("Event", backref="organizer_payment_requests")
+    organizer = db.relationship("User", foreign_keys=[organizer_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "event_name": self.event.name if self.event else None,
+            "organizer_id": self.organizer_id,
+            "organizer_name": self.organizer.name if self.organizer else None,
+            "amount": self.amount,
+            "currency": self.currency,
+            "description": self.description,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+        }
+
+
+class VendorEventVerification(db.Model):
+    """Organizer verification of vendor work for an event (Phase 1 professional flow)."""
+    __tablename__ = "vendor_event_verification"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    verified_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    verified_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    event = db.relationship("Event", backref="vendor_verifications")
+    vendor = db.relationship("User", foreign_keys=[vendor_id])
+    verified_by = db.relationship("User", foreign_keys=[verified_by_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "vendor_id": self.vendor_id,
+            "verified_by_id": self.verified_by_id,
+            "verified_at": self.verified_at.isoformat() if self.verified_at else None,
+        }
+
+
+# ✅ SERVICE MODELS - ADD THESE AT THE END
 class ServicePackage(db.Model):
     __tablename__ = "service_package"
     

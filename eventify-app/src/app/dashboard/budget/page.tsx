@@ -44,7 +44,13 @@ export default function BudgetPage() {
 
       if (eventsRes.ok) {
         const eventsData = await eventsRes.json()
-        setEvents(eventsData)
+        // Merge created and assigned events for full budget overview
+        const allEvents = [
+          ...(eventsData.created || []),
+          ...(eventsData.assigned || [])
+        ]
+        const uniqueEvents = Array.from(new Map(allEvents.map(e => [e.id, e])).values())
+        setEvents(uniqueEvents)
       }
 
       if (paymentsRes.ok) {
@@ -58,8 +64,11 @@ export default function BudgetPage() {
     }
   }
 
-  const totalAllocated = events.reduce((acc, curr) => acc + (curr.budget || 0), 0)
-  const totalUsed = payments.reduce((acc, curr) => acc + (curr.amount || 0), 0)
+  const eventList = Array.isArray(events) ? events : []
+  const paymentList = Array.isArray(payments) ? payments : []
+
+  const totalAllocated = eventList.reduce((acc, curr) => acc + (curr.budget || 0), 0)
+  const totalUsed = paymentList.reduce((acc, curr) => acc + (curr.amount || 0), 0)
   const overallPercentage = totalAllocated > 0 ? (totalUsed / totalAllocated) * 100 : 0
 
   if (loading) {

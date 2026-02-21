@@ -47,7 +47,15 @@ export default function AnalyticsPage() {
       const eventsData = await eventsRes.json()
       const paymentsData = await paymentsRes.json()
 
-      if (eventsRes.ok) setEvents(eventsData)
+      if (eventsRes.ok) {
+        // Merge created and assigned for unified analytics
+        const allEvents = [
+          ...(eventsData.created || []),
+          ...(eventsData.assigned || [])
+        ]
+        const uniqueEvents = Array.from(new Map(allEvents.map(e => [e.id, e])).values())
+        setEvents(uniqueEvents)
+      }
       if (paymentsRes.ok) setPayments(paymentsData.payments || [])
     } catch (error) {
       toast.error("Failed to sync analytics")
@@ -56,11 +64,14 @@ export default function AnalyticsPage() {
     }
   }
 
-  // Dynamic Calculations
-  const totalRevenue = events.reduce((sum, e) => sum + (e.budget || 0), 0)
-  const totalSpent = payments.reduce((sum, p) => sum + p.amount, 0)
-  const eventsCompleted = events.filter(e => e.progress === 100).length
-  const upcomingEvents = events.filter(e => new Date(e.date) >= new Date()).slice(0, 4)
+  // Dynamic Calculations with array safety
+  const eventList = Array.isArray(events) ? events : []
+  const paymentList = Array.isArray(payments) ? payments : []
+
+  const totalRevenue = eventList.reduce((sum, e) => sum + (e.budget || 0), 0)
+  const totalSpent = paymentList.reduce((sum, p) => sum + p.amount, 0)
+  const eventsCompleted = eventList.filter(e => e.progress === 100).length
+  const upcomingEvents = eventList.filter(e => new Date(e.date) >= new Date()).slice(0, 4)
 
   const eventPerformanceData = [
     { month: "Jan", events: 2, attendees: 150 },

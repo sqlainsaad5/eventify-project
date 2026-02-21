@@ -28,7 +28,9 @@ import {
   List,
   Star,
   ExternalLink,
-  UserPlus
+  UserPlus,
+  CheckCircle,
+  ShieldCheck
 } from "lucide-react";
 import {
   Dialog,
@@ -215,6 +217,8 @@ function VendorsPageContent() {
   const token = typeof window !== "undefined" ? localStorage.getItem("token")?.replace(/['"]+/g, "").trim() : null;
   const organizerId = getOrganizerId();
 
+  const [verifyingKey, setVerifyingKey] = useState<string | null>(null);
+
   const loadVendors = async () => {
     try {
       setLoading(true);
@@ -242,10 +246,42 @@ function VendorsPageContent() {
       });
       if (res.ok) {
         const data = await res.json();
-        setEvents(data);
+        // Defensive normalization for unified event list
+        let normalizedEvents = [];
+        if (Array.isArray(data)) {
+          normalizedEvents = data;
+        } else if (data && typeof data === 'object') {
+          normalizedEvents = [
+            ...(data.created || []),
+            ...(data.assigned || [])
+          ];
+        }
+        setEvents(normalizedEvents);
       }
     } catch (err) {
       console.error("Error loading events:", err);
+    }
+  };
+
+  const handleVerifyVendorWork = async (eventId: number, vendorId: number) => {
+    const key = `${eventId}-${vendorId}`;
+    setVerifyingKey(key);
+    try {
+      const res = await fetch(`http://localhost:5000/api/vendors/events/${eventId}/vendors/${vendorId}/verify`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast({ title: "Work verified", description: "Vendor can now request payment." });
+        await loadVendors();
+      } else {
+        const d = await res.json();
+        toast({ title: "Verification failed", description: d.error || "Could not verify", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Network error", variant: "destructive" });
+    } finally {
+      setVerifyingKey(null);
     }
   };
 
@@ -541,11 +577,42 @@ function VendorsPageContent() {
                         </div>
                       </div>
                       {vendor.assigned_events_count > 0 && (
-                        <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center justify-between">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Jobs</span>
-                          <Badge variant="secondary" className="bg-white border-slate-100 text-purple-700 font-black">
-                            {vendor.assigned_events_count}
-                          </Badge>
+                        <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Jobs</span>
+                            <Badge variant="secondary" className="bg-white border-slate-100 text-purple-700 font-black">
+                              {vendor.assigned_events_count}
+                            </Badge>
+                          </div>
+                          {Array.isArray(vendor.assigned_events) && vendor.assigned_events
+                            .filter((ae: any) => ae.completed && !ae.verified)
+                            .length > 0 && (
+                            <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Verify work</span>
+                              {vendor.assigned_events
+                                .filter((ae: any) => ae.completed && !ae.verified)
+                                .map((ae: any) => (
+                                  <div key={ae.id} className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium text-slate-700 truncate">{ae.name}</span>
+                                    <Button
+                                      size="sm"
+                                      className="h-7 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shrink-0"
+                                      disabled={verifyingKey === `${ae.id}-${vendor.id}`}
+                                      onClick={() => handleVerifyVendorWork(ae.id, vendor.id)}
+                                    >
+                                      {verifyingKey === `${ae.id}-${vendor.id}` ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <>
+                                          <ShieldCheck className="h-3 w-3 mr-1" />
+                                          Verify
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -743,12 +810,12 @@ function VendorsPageContent() {
                   <SelectValue placeholder="Select an event ecosystem" />
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl border-slate-100 shadow-xl">
-                  {events.filter(event =>
+                  {(Array.isArray(events) ? events : []).filter(event =>
                     !selectedVendor?.assigned_events?.some((ae: any) => ae.id === event.id)
                   ).length === 0 ? (
                     <div className="p-4 text-center text-xs text-slate-400 font-bold uppercase tracking-widest">No unassigned active events found</div>
                   ) : (
-                    events
+                    (Array.isArray(events) ? events : [])
                       .filter(event => !selectedVendor?.assigned_events?.some((ae: any) => ae.id === event.id))
                       .map((event) => (
                         <SelectItem key={event.id} value={String(event.id)} className="rounded-xl py-3 font-medium">

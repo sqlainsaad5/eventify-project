@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity  # ✅ ADD THIS IMPORT
-from app.models import User, Event, db
+from app.models import User, Event, db, VendorEventVerification, PaymentRequest
 from app.extensions import jwt
 
 vendors_bp = Blueprint("vendors", __name__, url_prefix="/api/vendors")
@@ -14,6 +14,15 @@ def get_vendors():
         vendors = User.query.filter_by(role="vendor").all()
         vendor_list = []
         for v in vendors:
+            accepted_events = [e for e in v.assigned_events if e.organizer_id and e.organizer_status == 'accepted']
+            assigned_events_with_status = []
+            for event in accepted_events:
+                ev_dict = event.to_dict()
+                ev_dict["completed"] = event in v.completed_events
+                ev_dict["verified"] = VendorEventVerification.query.filter_by(
+                    event_id=event.id, vendor_id=v.id
+                ).first() is not None
+                assigned_events_with_status.append(ev_dict)
             vendor_list.append({
                 "id": v.id,
                 "name": v.name,
@@ -23,8 +32,8 @@ def get_vendors():
                 "city": getattr(v, "city", "Unknown"),
                 "profile_image": getattr(v, "profile_image", ""),
                 "rating": 4.5,
-                "assigned_events": [event.to_dict() for event in v.assigned_events],
-                "assigned_events_count": len(v.assigned_events)
+                "assigned_events": assigned_events_with_status,
+                "assigned_events_count": len(accepted_events),
             })
         return jsonify(vendor_list), 200
     except Exception as e:
@@ -47,6 +56,19 @@ def assign_vendor():
         if not vendor or not event:
             return jsonify({"error": "Vendor or event not found"}), 404
 
+        # ✅ Professional Hierarchy Check: ONLY the assigned organizer can hire vendors.
+        # Direct assignment by the project owner (User) is prohibited to maintain organizational flow.
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if event.organizer_id != current_user_id:
+            return jsonify({
+                "error": "Unauthorized: Only the assigned professional organizer can manage vendor partnerships for this event."
+            }), 403
+            
+        if user.role != "organizer":
+            return jsonify({"error": "Unauthorized: Only users with the 'organizer' role can perform this action."}), 403
+
         # Check if vendor is already assigned to this event
         if event in vendor.assigned_events:
             return jsonify({"error": f"Vendor '{vendor.name}' is already assigned to '{event.name}'"}), 400
@@ -55,9 +77,10 @@ def assign_vendor():
         vendor.assigned_events.append(event)
         db.session.commit()
 
-        # Notify Vendor
+        # Notify Vendor (Dual Notification for Assignment & Booking)
         try:
             from app.api.payments import create_notification
+            # 1. Assignment Notification (The "Fine" one)
             create_notification(
                 vendor_id,
                 "🎉 New Event Assignment",
@@ -65,8 +88,16 @@ def assign_vendor():
                 "info",
                 {"event_id": event_id}
             )
+            # 2. Booking Notification (The New one)
+            create_notification(
+                vendor_id,
+                "📅 New Event Booking",
+                f"You have a new booking request for '{event.name}'. Check your bookings for details.",
+                "success",
+                {"event_id": event_id, "type": "booking"}
+            )
         except Exception as e:
-            print(f"Assign notification failed: {e}")
+            print(f"Assignment/Booking notifications failed: {e}")
 
         return jsonify({
             "message": f"✅ Vendor '{vendor.name}' successfully assigned to '{event.name}'",
@@ -80,6 +111,7 @@ def assign_vendor():
     
     # ✅ Unassign vendor from event
 @vendors_bp.route("/unassign", methods=["POST"])
+@jwt_required()
 def unassign_vendor():
     try:
         data = request.get_json()
@@ -91,6 +123,11 @@ def unassign_vendor():
 
         if not vendor or not event:
             return jsonify({"error": "Vendor or event not found"}), 404
+            
+        # ✅ Professional Hierarchy Check: ONLY the assigned organizer can manage vendors.
+        current_user_id = int(get_jwt_identity())
+        if event.organizer_id != current_user_id:
+            return jsonify({"error": "Unauthorized: Only the assigned professional organizer can manage this event's vendors"}), 403
 
         # Remove assignment
         if event in vendor.assigned_events:
@@ -130,7 +167,7 @@ def unassign_vendor():
 @vendors_bp.route("/assigned_events/<int:vendor_id>", methods=["GET"])
 @jwt_required()
 def get_assigned_events(vendor_id):
-    """Get assigned events with completion status"""
+    """Get assigned events with completion status (Filtered by Organizer Acceptance)"""
     try:
         current_user_id = get_jwt_identity()
         
@@ -143,9 +180,21 @@ def get_assigned_events(vendor_id):
         
         assigned_events = []
         for event in vendor.assigned_events:
-            # ✅ CHECK IF EVENT IS COMPLETED BY THIS VENDOR
+            # ✅ EXCLUSIVITY LOCK: Vendors only see events where a professional organizer is in charge AND has accepted.
+            # This follows the principle: "Whatever has been assigned to someone, only that person should be able to see it."
+            if not event.organizer_id or event.organizer_status != 'accepted':
+                continue
+
             is_completed = event in vendor.completed_events
-            
+            verification = VendorEventVerification.query.filter_by(
+                event_id=event.id, vendor_id=current_user_id
+            ).first()
+            is_verified = verification is not None
+            pr = PaymentRequest.query.filter_by(
+                event_id=event.id, vendor_id=int(current_user_id)
+            ).first()
+            payment_request_status = pr.status if pr else None
+
             assigned_events.append({
                 "id": event.id,
                 "name": event.name,
@@ -153,7 +202,9 @@ def get_assigned_events(vendor_id):
                 "venue": event.venue,
                 "budget": event.budget,
                 "status": "completed" if is_completed else "assigned",
-                "organizer_id": event.user_id
+                "organizer_id": event.organizer_id,
+                "verified": is_verified,
+                "payment_request_status": payment_request_status,
             })
         
         return jsonify({
@@ -166,11 +217,10 @@ def get_assigned_events(vendor_id):
 @vendors_bp.route("/<int:vendor_id>/bookings", methods=["GET"])
 @jwt_required()
 def get_vendor_bookings(vendor_id):
-    """Get vendor's bookings (compatibility with frontend)"""
+    """Get vendor's bookings (Filtered for professional exclusivity)"""
     try:
         current_user_id = get_jwt_identity()
         
-        # Verify vendor is accessing their own data
         if int(vendor_id) != int(current_user_id):
             return jsonify({"error": "Unauthorized"}), 403
         
@@ -178,19 +228,33 @@ def get_vendor_bookings(vendor_id):
         if not vendor:
             return jsonify({"error": "Vendor not found"}), 404
         
-        # Return assigned events as bookings for compatibility
-        assigned_events = vendor.assigned_events
-        
         bookings = []
-        for event in assigned_events:
-            organizer = User.query.get(event.user_id)
+        for event in vendor.assigned_events:
+            # ✅ EXCLUSIVITY LOCK: Only show fully vetted projects
+            if not event.organizer_id or event.organizer_status != 'accepted':
+                continue
+
+            is_completed = event in vendor.completed_events
+            verification = VendorEventVerification.query.filter_by(
+                event_id=event.id, vendor_id=vendor_id
+            ).first()
+            verified = verification is not None
+            pr = PaymentRequest.query.filter_by(
+                event_id=event.id, vendor_id=int(vendor_id)
+            ).first()
+            payment_request_status = pr.status if pr else None
+
+            organizer = User.query.get(event.organizer_id)
             bookings.append({
                 "id": event.id,
                 "eventName": event.name,
                 "date": event.date,
-                "client": organizer.name if organizer else "Organizer",
-                "status": "confirmed",  # Default status
-                "budget": f"${event.budget}"
+                "client": organizer.name if organizer else "Lead Organizer",
+                "status": "confirmed",
+                "budget": f"${event.budget}",
+                "verified": verified,
+                "completed": is_completed,
+                "payment_request_status": payment_request_status,
             })
         
         return jsonify(bookings), 200
@@ -270,6 +334,66 @@ def mark_event_completed(event_id):
         return jsonify({"error": str(e)}), 500
 
 
+@vendors_bp.route("/events/<int:event_id>/vendors/<int:vendor_id>/verify", methods=["PUT"])
+@jwt_required()
+def verify_vendor_work(event_id, vendor_id):
+    """Organizer (or event owner) verifies vendor work for an event. Vendor must have marked event complete first."""
+    try:
+        current_user_id = int(get_jwt_identity())
+        event = Event.query.get(event_id)
+        if not event:
+            return jsonify({"error": "Event not found"}), 404
+        if event.user_id != current_user_id and event.organizer_id != current_user_id:
+            return jsonify({"error": "Unauthorized: Only event owner or assigned organizer can verify vendor work"}), 403
+
+        vendor = User.query.get(vendor_id)
+        if not vendor or vendor.role != "vendor":
+            return jsonify({"error": "Vendor not found"}), 404
+        if event not in vendor.assigned_events:
+            return jsonify({"error": "Vendor is not assigned to this event"}), 400
+        if event not in vendor.completed_events:
+            return jsonify({"error": "Vendor must mark the event as complete before organizer can verify"}), 400
+
+        existing = VendorEventVerification.query.filter_by(event_id=event_id, vendor_id=vendor_id).first()
+        if existing:
+            return jsonify({
+                "message": "Work already verified for this vendor",
+                "event_id": event_id,
+                "vendor_id": vendor_id,
+                "verified": True,
+            }), 200
+
+        verification = VendorEventVerification(
+            event_id=event_id,
+            vendor_id=vendor_id,
+            verified_by_id=current_user_id,
+        )
+        db.session.add(verification)
+        db.session.commit()
+
+        try:
+            from app.api.payments import create_notification
+            create_notification(
+                vendor_id,
+                "Work Verified",
+                f"Your work for '{event.name}' has been verified by the organizer. You may request payment.",
+                "success",
+                {"event_id": event_id, "vendor_id": vendor_id},
+            )
+        except Exception as e:
+            print(f"Verify notification failed: {e}")
+
+        return jsonify({
+            "message": "Vendor work verified successfully",
+            "event_id": event_id,
+            "vendor_id": vendor_id,
+            "verified": True,
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 @vendors_bp.route("/<int:vendor_id>", methods=["GET"])
 @jwt_required()  # ✅ ADD JWT PROTECTION
 def get_vendor(vendor_id):
@@ -278,11 +402,19 @@ def get_vendor(vendor_id):
         
         if not vendor or vendor.role != "vendor":
             return jsonify({"error": "Vendor not found"}), 404
-            
-        vendor_data = vendor.to_dict()
-        vendor_data["assigned_events_count"] = len(vendor.assigned_events)
-        vendor_data["assigned_events"] = [event.to_dict() for event in vendor.assigned_events]
-        
+
+        verified_events = [e for e in vendor.assigned_events if e.organizer_id and e.organizer_status == 'accepted']
+        vendor_data = {
+            "id": vendor.id,
+            "name": vendor.name,
+            "email": vendor.email,
+            "category": getattr(vendor, "category", "General"),
+            "phone": getattr(vendor, "phone", ""),
+            "city": getattr(vendor, "city", ""),
+            "profile_image": getattr(vendor, "profile_image", ""),
+            "assigned_events_count": len(verified_events),
+            "assigned_events": [event.to_dict() for event in verified_events],
+        }
         return jsonify(vendor_data), 200
         
     except Exception as e:
@@ -300,7 +432,7 @@ def get_available_vendors():
                 "id": v.id, 
                 "name": v.name, 
                 "category": v.category,
-                "assigned_events_count": len(v.assigned_events)
+                "assigned_events_count": len([e for e in v.assigned_events if e.organizer_id and e.organizer_status == 'accepted'])
             }
             for v in vendors
         ]), 200

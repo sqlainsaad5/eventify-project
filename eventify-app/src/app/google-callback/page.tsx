@@ -33,6 +33,9 @@ export default function GoogleCallbackPage() {
         case "vendor":
           router.replace("/vendor")
           break
+        case "user":
+          router.replace("/")
+          break
         default:
           router.replace("/dashboard")
           break

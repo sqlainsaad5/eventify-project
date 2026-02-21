@@ -145,6 +145,7 @@ export default function VendorBookingsPage() {
       })
       if (res.ok) {
         toast.success("Payment request submitted! The organizer will review it.")
+        fetchAll()
       } else {
         const d = await res.json()
         toast.error(d.error || "Failed to submit payment request")
@@ -403,7 +404,7 @@ export default function VendorBookingsPage() {
                   return (
                     <Card
                       key={event.id}
-                      className="border-slate-200/60 hover:shadow-md transition-all duration-200 rounded-2xl overflow-hidden"
+                      className={`border-slate-200/60 transition-all duration-200 rounded-2xl overflow-hidden ${event.payment_request_status === "paid" ? "opacity-85 border-slate-200 border hover:shadow-sm" : "hover:shadow-md"}`}
                     >
                       <div className="h-1.5 bg-gradient-to-r from-emerald-400 to-teal-500" />
                       <CardHeader className="pb-3">
@@ -432,22 +433,46 @@ export default function VendorBookingsPage() {
                             <DollarSign className="h-3 w-3" />
                             Estimated Payment: ${paymentAmount.toLocaleString()}
                           </p>
+                          {event.verified && !event.payment_request_status && (
+                            <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3" />
+                              Verified by organizer — you may request payment
+                            </p>
+                          )}
                         </div>
 
                         <Button
                           onClick={() => handleRequestPayment(event.id, paymentAmount)}
-                          disabled={processing === event.id}
-                          className="w-full bg-purple-600 hover:bg-purple-700 rounded-xl text-sm h-9"
+                          disabled={
+                            processing === event.id ||
+                            !event.verified ||
+                            event.payment_request_status != null
+                          }
+                          className="w-full bg-purple-600 hover:bg-purple-700 rounded-xl text-sm h-9 disabled:opacity-60"
                         >
                           {processing === event.id ? (
                             <Loader2 className="h-4 w-4 animate-spin mr-1" />
                           ) : (
                             <DollarSign className="h-4 w-4 mr-1" />
                           )}
-                          Request Payment
+                          {event.payment_request_status === "paid"
+                            ? "Paid"
+                            : event.payment_request_status === "pending" || event.payment_request_status === "approved"
+                              ? "Request submitted"
+                              : event.payment_request_status === "rejected"
+                                ? "Rejected"
+                                : event.verified
+                                  ? "Request Payment"
+                                  : "Awaiting verification"}
                         </Button>
                         <p className="text-[11px] text-slate-400 text-center">
-                          The organizer will review and approve your request.
+                          {event.payment_request_status === "paid"
+                            ? "You have been paid for this event."
+                            : event.payment_request_status
+                              ? "One request per event. Wait for organizer to approve or pay."
+                              : event.verified
+                                ? "The organizer will review and approve your request."
+                                : "Complete your work and wait for the organizer to verify before requesting payment."}
                         </p>
                       </CardContent>
                     </Card>

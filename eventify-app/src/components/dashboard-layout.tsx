@@ -21,7 +21,9 @@ import {
   User,
   LogOut,
   Settings,
+  MessageSquare
 } from "lucide-react"
+import { NotificationBell } from "@/components/notification-bell"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -41,6 +43,7 @@ const navItems = [
   { href: "/dashboard/vendors", label: "Browse Vendors", icon: Users },
   { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/budget", label: "Budget Planner", icon: Calculator },
+  { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/chatbot", label: "AI Assistant", icon: Bot },
 ]
@@ -54,9 +57,22 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [unreadChatCount, setUnreadChatCount] = useState(0)
 
   useEffect(() => {
-    // 1. Get User Data from LocalStorage initially
+    // 1. Get User Data and Role Security
     if (typeof window !== "undefined") {
       const savedUser = localStorage.getItem("user")
+      const savedRole = localStorage.getItem("role")
+
+      // Strict Redirection Layer: Isolate the Dashboard based on professional roles
+      if (savedRole === "vendor") {
+        router.replace("/vendor")
+        return
+      }
+
+      if (savedRole === "user") {
+        router.replace("/my-events")
+        return
+      }
+
       if (savedUser) {
         try {
           setUserData(JSON.parse(savedUser))
@@ -306,69 +322,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               <Menu className="h-6 w-6" />
             </button>
             <div className="flex items-center gap-4 ml-auto">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative text-slate-500 hover:text-slate-900 rounded-xl">
-                    <Bell className="h-5 w-5" />
-                    {notifications.filter(n => !n.is_read).length > 0 && (
-                      <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center bg-red-500 border-2 border-white text-white text-[10px] font-black rounded-full animate-in zoom-in duration-300">
-                        {notifications.filter(n => !n.is_read).length}
-                      </span>
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80 rounded-2xl p-2 shadow-xl border-slate-100">
-                  <DropdownMenuLabel className="font-bold text-slate-900 border-b border-slate-50 pb-2 mb-2">
-                    Recent Notifications
-                  </DropdownMenuLabel>
-                  <div className="max-h-80 overflow-y-auto space-y-1">
-                    {notifications.length > 0 ? (
-                      notifications.slice(0, 10).map((n) => (
-                        <DropdownMenuItem
-                          key={n.id}
-                          onClick={() => markAsRead(n)}
-                          className={cn(
-                            "flex flex-col items-start gap-1 p-3 rounded-xl cursor-default transition-colors",
-                            n.is_read ? "opacity-60" : "bg-purple-50/50"
-                          )}
-                        >
-                          <div className="flex items-center justify-between w-full">
-                            <span className="font-bold text-xs text-slate-900">{n.title}</span>
-                            {!n.is_read && <span className="w-1.5 h-1.5 bg-purple-600 rounded-full" />}
-                          </div>
-                          <p className="text-[11px] text-slate-500 leading-normal">{n.message}</p>
-                          <span className="text-[9px] text-slate-400 font-bold uppercase mt-1">
-                            {new Date(n.created_at).toLocaleDateString()}
-                          </span>
-                        </DropdownMenuItem>
-                      ))
-                    ) : (
-                      <div className="py-8 text-center text-slate-400 text-xs italic">
-                        Everything clear! No new alerts.
-                      </div>
-                    )}
-                  </div>
-                  {notifications.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator className="bg-slate-50" />
-                      <div className="flex items-center justify-between p-2">
-                        <DropdownMenuItem
-                          onClick={() => router.push("/dashboard/vendors")}
-                          className="text-[10px] font-bold text-slate-500 hover:text-purple-600 uppercase tracking-widest cursor-pointer"
-                        >
-                          View All History
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={clearAllNotifications}
-                          className="text-[10px] font-bold text-red-500 hover:text-red-600 uppercase tracking-widest cursor-pointer"
-                        >
-                          Clear All
-                        </DropdownMenuItem>
-                      </div>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <NotificationBell />
 
               <div className="h-8 w-[1px] bg-slate-200 mx-1" />
               <div className="flex items-center gap-3">

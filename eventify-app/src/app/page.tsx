@@ -1,12 +1,15 @@
 "use client"
 
 import type React from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { NotificationBell } from "@/components/notification-bell"
 import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
 import {
   Sparkles,
   Zap,
-  Star,
   ArrowRight,
   CheckCircle,
   Layout,
@@ -15,12 +18,54 @@ import {
   Shield,
   CreditCard,
   Users,
-  Server,
-  Lock,
-  ChevronDown
+  ChevronDown,
+  LogOut,
+  User,
+  CalendarDays,
+  MessageSquare
 } from "lucide-react"
 
 export default function HomePage() {
+  const router = useRouter()
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Read auth state once on mount
+  useEffect(() => {
+    try {
+      const storedUser = localStorage.getItem("user")
+      const storedRole = localStorage.getItem("role")
+      if (storedUser) setUser(JSON.parse(storedUser))
+      if (storedRole) setRole(storedRole)
+    } catch { /* ignore */ }
+  }, [])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  const handleSignOut = () => {
+    localStorage.clear()
+    setUser(null)
+    setRole(null)
+    setDropdownOpen(false)
+    router.push("/")
+  }
+
+  // Derive initials for avatar
+  const initials = user?.name
+    ? user.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+    : "U"
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
 
@@ -47,14 +92,142 @@ export default function HomePage() {
           </nav>
 
           <div className="flex items-center gap-4">
-            <Link href="/login" className="hidden md:block text-sm font-bold text-slate-900 hover:text-indigo-600 transition-colors">
-              Log in
-            </Link>
-            <Link href="/signup">
-              <Button className="h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-xl shadow-slate-200 transition-all hover:scale-105 active:scale-95 font-bold">
-                Get Started
-              </Button>
-            </Link>
+            {user ? (
+              /* ─── Logged-in: Notification Bell + Profile Avatar + Dropdown ─── */
+              <div className="flex items-center gap-2">
+                <NotificationBell />
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    onClick={() => setDropdownOpen((o) => !o)}
+                    className="flex items-center gap-2 h-11 px-3 rounded-xl hover:bg-slate-100 transition-colors group"
+                  >
+                    {/* Avatar circle */}
+                    <div
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-black shadow-lg"
+                      style={{ background: "linear-gradient(135deg,#6366f1,#a855f7)" }}
+                    >
+                      {initials}
+                    </div>
+                    <span className="hidden md:block text-sm font-bold text-slate-700 group-hover:text-slate-900 transition-colors max-w-[120px] truncate">
+                      {user.name}
+                    </span>
+                    <ChevronDown
+                      className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""
+                        }`}
+                    />
+                  </button>
+
+                  {/* Dropdown menu */}
+                  {dropdownOpen && (
+                    <div className="absolute right-0 top-full mt-3 w-52 bg-white rounded-2xl border border-slate-100 shadow-2xl shadow-slate-200/60 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                      {/* User info header */}
+                      <div className="px-3 py-2 mb-1">
+                        <p className="text-sm font-black text-slate-900 truncate">{user.name}</p>
+                        <p className="text-xs text-slate-400 font-medium truncate">{user.email}</p>
+                      </div>
+                      <div className="h-px bg-slate-100 mb-1" />
+
+                      {/* Role-based Dynamic Links */}
+                      {role === "organizer" && (
+                        <>
+                          <Link
+                            href="/dashboard/profile"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <User className="h-4 w-4" />
+                            My Profile
+                          </Link>
+                          <Link
+                            href="/dashboard/events"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <CalendarDays className="h-4 w-4" />
+                            My Events
+                          </Link>
+                        </>
+                      )}
+
+                      {role === "vendor" && (
+                        <Link
+                          href="/vendor"
+                          onClick={() => setDropdownOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                        >
+                          <Layout className="h-4 w-4" />
+                          Vendor Dashboard
+                        </Link>
+                      )}
+
+                      {role === "user" && (
+                        <>
+                          <Link
+                            href="/my-events"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <CalendarDays className="h-4 w-4" />
+                            My Events
+                          </Link>
+                          <Link
+                            href="/my-events/messages"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            Messages
+                          </Link>
+                          <Link
+                            href="/my-profile"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <User className="h-4 w-4" />
+                            My Profiles
+                          </Link>
+                        </>
+                      )}
+
+                      {role === "organizer" && (
+                        <>
+                          <Link
+                            href="/dashboard/messages"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            Messages
+                          </Link>
+                        </>
+                      )}
+
+                      <div className="h-px bg-slate-100 my-1" />
+
+                      <button
+                        onClick={handleSignOut}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-red-500 hover:bg-red-50 transition-colors"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Sign Out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* ─── Guest: Log in + Get Started ─── */
+              <>
+                <Link href="/login" className="hidden md:block text-sm font-bold text-slate-900 hover:text-indigo-600 transition-colors">
+                  Log in
+                </Link>
+                <Link href="/signup">
+                  <Button className="h-11 px-6 bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-xl shadow-slate-200 transition-all hover:scale-105 active:scale-95 font-bold">
+                    Get Started
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -82,20 +255,55 @@ export default function HomePage() {
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
-              <Link href="/signup" className="w-full sm:w-auto">
-                <Button size="lg" className="w-full h-16 px-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xl font-black shadow-2xl shadow-indigo-200 transition-all hover:scale-105 active:scale-95 group">
-                  Get Started <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
-                </Button>
-              </Link>
-              <Link href="/login" className="w-full sm:w-auto">
-                <Button size="lg" variant="outline" className="w-full h-16 px-12 border-2 border-slate-100 bg-white text-slate-900 rounded-2xl text-xl font-bold hover:bg-slate-50 hover:border-slate-200 transition-all">
-                  Live Demo
-                </Button>
-              </Link>
+              {!user ? (
+                <>
+                  <Link href="/signup" className="w-full sm:w-auto">
+                    <Button size="lg" className="w-full h-16 px-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xl font-black shadow-2xl shadow-indigo-200 transition-all hover:scale-105 active:scale-95 group">
+                      Get Started <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
+                    </Button>
+                  </Link>
+                  <Link href="/login" className="w-full sm:w-auto">
+                    <Button size="lg" variant="outline" className="w-full h-16 px-12 border-2 border-slate-100 bg-white text-slate-900 rounded-2xl text-xl font-bold hover:bg-slate-50 hover:border-slate-200 transition-all">
+                      Live Demo
+                    </Button>
+                  </Link>
+                </>
+              ) : (
+                <Link href={role === "user" ? "/event-details" : "/dashboard"} className="w-full sm:w-auto">
+                  <Button size="lg" className="w-full h-16 px-12 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xl font-black shadow-2xl shadow-slate-200 transition-all hover:scale-105 active:scale-95 group">
+                    {role === "user" ? "Let me know about your Events" : "Go to Dashboard"} <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
+                  </Button>
+                </Link>
+              )}
             </div>
+
+            {/* 🔹 EVENT DETAILS CTA BUTTON */}
+            {role !== "user" && (
+              <div className="mt-8 flex justify-center">
+                <Link href={user ? "/dashboard/events/new" : "/signup?from=event-cta"} className="w-full sm:w-auto">
+                  <Button
+                    size="lg"
+                    className="w-full h-14 px-10 rounded-2xl text-lg font-black text-white shadow-2xl shadow-fuchsia-200 transition-all hover:scale-105 active:scale-95 group relative overflow-hidden"
+                    style={{
+                      background: "linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)",
+                    }}
+                  >
+                    <span className="relative z-10 flex items-center gap-3">
+                      <Sparkles className="h-5 w-5 animate-pulse" />
+                      Give Me Your Event Details
+                      <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                    </span>
+                    {/* Shimmer overlay */}
+                    <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </Button>
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </section>
+
+
 
 
       {/* 🔹 PLATFORM FEATURES */}
@@ -256,9 +464,9 @@ export default function HomePage() {
               <h2 className="text-5xl md:text-7xl font-black text-slate-900 mb-8 tracking-tighter">Ready to Deploy?</h2>
               <p className="text-xl text-slate-500 mb-12 font-medium">Join thousands of professional organizers delivering world-class experiences.</p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link href="/signup">
+                <Link href={user ? "/dashboard" : "/signup"}>
                   <Button size="lg" className="h-16 px-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-lg font-black shadow-2xl hover:shadow-indigo-200 transition-all hover:scale-105 active:scale-95">
-                    Get Started Now
+                    {user ? "Back to Dashboard" : "Get Started Now"}
                   </Button>
                 </Link>
               </div>

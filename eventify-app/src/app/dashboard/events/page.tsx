@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
@@ -19,7 +20,8 @@ import {
   Filter,
   Loader2,
   Clock,
-  ExternalLink
+  ExternalLink,
+  MessageSquare
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -40,13 +42,20 @@ interface Event {
   progress: number
   vendor_category: string
   image_url?: string
+  organizer_status?: string
+  user_id?: number
+  organizer_id?: number | null
 }
 
 export default function AllEventsPage() {
+  const router = useRouter()
   const [events, setEvents] = useState<Event[]>([])
+  const [assignedEvents, setAssignedEvents] = useState<Event[]>([])
+  const [organizerRequests, setOrganizerRequests] = useState<{ event_id: number; status: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
+  const [activeTab, setActiveTab] = useState<"personal" | "assigned">("personal")
 
   useEffect(() => {
     fetchEvents()
@@ -56,20 +65,54 @@ export default function AllEventsPage() {
     setLoading(true)
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     try {
-      const res = await fetch("http://localhost:5000/api/events", {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setEvents(data)
+      const [eventsRes, organizerRequestsRes] = await Promise.all([
+        fetch("http://localhost:5000/api/events", {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch("http://localhost:5000/api/payments/organizer-requests", {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ])
+      if (eventsRes.ok) {
+        const data = await eventsRes.json()
+        setEvents(data.created || [])
+        setAssignedEvents(data.assigned || [])
       } else {
         toast.error("Failed to fetch events")
+      }
+      if (organizerRequestsRes.ok) {
+        const reqData = await organizerRequestsRes.json()
+        setOrganizerRequests(reqData.organizer_requests || [])
       }
     } catch (err) {
       console.error("Fetch events error:", err)
       toast.error("An error occurred while fetching events")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleAssignmentResponse = async (id: number, status: 'accepted' | 'rejected') => {
+    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+    try {
+      const res = await fetch(`http://localhost:5000/api/events/${id}/respond-assignment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ status })
+      })
+
+      if (res.ok) {
+        toast.success(`Project ${status === 'accepted' ? 'accepted' : 'declined'} successfully`)
+        // Refresh events to update status
+        fetchEvents()
+      } else {
+        toast.error("Failed to update status")
+      }
+    } catch (err) {
+      toast.error("Error updating assignment status")
     }
   }
 
@@ -99,6 +142,15 @@ export default function AllEventsPage() {
     e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  const getUserId = (): number | null => {
+    try {
+      const u = localStorage.getItem("user")
+      if (!u) return null
+      const parsed = JSON.parse(u)
+      return parsed?.id ?? parsed?._id ?? null
+    } catch { return null }
+  }
 
   return (
     <DashboardLayout>
@@ -131,6 +183,23 @@ export default function AllEventsPage() {
             />
           </div>
 
+          <div className="flex bg-slate-100/50 p-1.5 rounded-2xl gap-1">
+            <Button
+              variant={activeTab === "personal" ? "secondary" : "ghost"}
+              onClick={() => setActiveTab("personal")}
+              className={`rounded-xl h-9 px-4 text-xs font-black uppercase tracking-widest ${activeTab === "personal" ? "bg-white shadow-sm text-purple-600" : "text-slate-400"}`}
+            >
+              My Personal
+            </Button>
+            <Button
+              variant={activeTab === "assigned" ? "secondary" : "ghost"}
+              onClick={() => setActiveTab("assigned")}
+              className={`rounded-xl h-9 px-4 text-xs font-black uppercase tracking-widest ${activeTab === "assigned" ? "bg-white shadow-sm text-purple-600" : "text-slate-400"}`}
+            >
+              Assigned Projects {assignedEvents.length > 0 && <Badge className="ml-2 bg-purple-600 text-white border-none text-[8px] h-4 w-4 p-0 flex items-center justify-center">{assignedEvents.length}</Badge>}
+            </Button>
+          </div>
+
           <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
             <Button
               variant={viewMode === "grid" ? "outline" : "ghost"}
@@ -157,11 +226,22 @@ export default function AllEventsPage() {
             <Loader2 className="h-10 w-10 text-purple-600 animate-spin" />
             <p className="text-slate-500 font-bold animate-pulse uppercase tracking-widest text-[10px]">Assembling your events...</p>
           </div>
-        ) : filteredEvents.length > 0 ? (
+        ) : (activeTab === "personal" ? events : assignedEvents).filter(e =>
+          e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
+        ).length > 0 ? (
           viewMode === "grid" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {filteredEvents.map((event) => (
-                <Card key={event.id} className="group overflow-hidden border-slate-200/60 shadow-sm hover:shadow-2xl hover:shadow-purple-100 hover:border-purple-200 transition-all duration-500 rounded-[32px] bg-white">
+              {(activeTab === "personal" ? events : assignedEvents).filter(e =>
+                e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
+              ).map((event) => {
+                const userId = getUserId()
+                const organizerPaid = userId != null && event.organizer_id === userId && organizerRequests.some((r) => r.event_id === event.id && r.status === "paid")
+                return (
+                <Card key={event.id} className={`group overflow-hidden border-slate-200/60 shadow-sm transition-all duration-500 rounded-[32px] bg-white ${activeTab === "assigned" ? "border-l-4 border-l-emerald-500" : ""} ${organizerPaid ? "opacity-85 border-slate-200 hover:shadow-lg" : "hover:shadow-2xl hover:shadow-purple-100"}`}>
                   <div className="relative h-48 bg-slate-100 overflow-hidden">
                     <img
                       src={event.image_url || `https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=500&q=80`}
@@ -169,10 +249,18 @@ export default function AllEventsPage() {
                       alt={event.name}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="absolute top-4 left-4">
+                    <div className="absolute top-4 left-4 flex gap-2">
                       <Badge className="bg-white/90 backdrop-blur-md text-purple-600 border-none hover:bg-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
                         {event.vendor_category}
                       </Badge>
+                      {organizerPaid && (
+                        <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Paid</Badge>
+                      )}
+                      {activeTab === "assigned" && (
+                        <Badge className="bg-emerald-500 text-white border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                          Managed Project
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <CardContent className="p-6">
@@ -211,27 +299,66 @@ export default function AllEventsPage() {
                     </div>
 
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-widest">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="h-3.5 w-3.5" />
-                          {new Date(event.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {activeTab === "assigned" && event.organizer_status === "pending" ? (
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => handleAssignmentResponse(event.id, 'accepted')}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 h-10 rounded-xl font-bold text-xs uppercase tracking-widest"
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => handleAssignmentResponse(event.id, 'rejected')}
+                            className="flex-1 border-red-200 text-red-600 hover:bg-red-50 h-10 rounded-xl font-bold text-xs uppercase tracking-widest"
+                          >
+                            Decline
+                          </Button>
                         </div>
-                        <div className="text-purple-600 font-black">
-                          ${(event.budget / 1000).toFixed(1)}k
-                        </div>
-                      </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-widest">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5" />
+                              {new Date(event.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </div>
+                            <div className="text-purple-600 font-black">
+                              ${(event.budget / 1000).toFixed(1)}k
+                            </div>
+                          </div>
 
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-[11px] font-bold">
-                          <span className="text-slate-500">Completion</span>
-                          <span className="text-purple-600">{event.progress}%</span>
-                        </div>
-                        <Progress value={event.progress} className="h-2 bg-slate-100" />
-                      </div>
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-[11px] font-bold">
+                              <span className="text-slate-500">Project Progress</span>
+                              <span className="text-purple-600">{event.progress}%</span>
+                            </div>
+                            <Progress value={event.progress} className="h-2 bg-slate-100" />
+                          </div>
+
+                          {activeTab === "assigned" && (
+                            <div className="space-y-3">
+                              <Badge variant="outline" className={`w-full py-1.5 justify-center rounded-xl border-none font-black text-[9px] uppercase tracking-widest ${event.organizer_status === 'accepted' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                                }`}>
+                                {event.organizer_status === 'accepted' ? "Vision Active" : "Assignment Declined"}
+                              </Badge>
+
+                              {event.organizer_status === "accepted" && (
+                                <Button
+                                  onClick={() => router.push(`/dashboard/messages?partnerId=${event.user_id}`)}
+                                  className="w-full bg-slate-900 hover:bg-black text-white h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 shadow-lg"
+                                >
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  Message Client
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+              );})}
             </div>
           ) : (
             <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
@@ -247,8 +374,15 @@ export default function AllEventsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filteredEvents.map((event) => (
-                    <tr key={event.id} className="hover:bg-slate-50/80 transition-colors group">
+                  {(activeTab === "personal" ? events : assignedEvents).filter(e =>
+                    e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).map((event) => {
+                    const userId = getUserId()
+                    const organizerPaid = userId != null && event.organizer_id === userId && organizerRequests.some((r) => r.event_id === event.id && r.status === "paid")
+                    return (
+                    <tr key={event.id} className={`transition-colors group ${organizerPaid ? "bg-slate-50/80 opacity-90" : "hover:bg-slate-50/80"}`}>
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0">
@@ -279,6 +413,9 @@ export default function AllEventsPage() {
                       </td>
                       <td className="px-6 py-5">
                         <div className="w-32 space-y-1.5">
+                          {organizerPaid && (
+                            <Badge className="bg-emerald-100 text-emerald-700 font-semibold mb-1">Paid</Badge>
+                          )}
                           <div className="flex justify-between text-[10px] font-bold text-slate-400">
                             <span>{event.progress}%</span>
                           </div>
@@ -291,7 +428,7 @@ export default function AllEventsPage() {
                         </Button>
                       </td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
               </table>
             </div>

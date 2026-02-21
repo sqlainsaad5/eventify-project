@@ -60,8 +60,22 @@ def debug_token():
 @jwt_required()
 def list_events():
     user_id = get_jwt_identity()
-    events = Event.query.filter_by(user_id=user_id).all()
-    return jsonify([e.to_dict() for e in events]), 200
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+        
+    # Personal events (created by user)
+    created_events = Event.query.filter_by(user_id=user_id).all()
+    
+    # Assigned events (if user is organizer)
+    assigned_events = []
+    if user.role == "organizer":
+        assigned_events = Event.query.filter_by(organizer_id=user_id).all()
+        
+    return jsonify({
+        "created": [e.to_dict() for e in created_events],
+        "assigned": [e.to_dict() for e in assigned_events]
+    }), 200
 
 
 # ✅ Create a new event
@@ -108,6 +122,17 @@ def create_event():
             image_file.save(filepath)
             image_url = f"http://localhost:5000/uploads/{unique_filename}"
 
+        organizer_id = data.get("organizer_id")
+        if organizer_id:
+            try:
+                organizer_id = int(organizer_id)
+                # Optional: Validate that the user is actually an organizer
+                selected_org = User.query.get(organizer_id)
+                if not selected_org or selected_org.role != "organizer":
+                    return jsonify({"error": "Invalid organizer selected"}), 400
+            except (ValueError, TypeError):
+                organizer_id = None
+
         event = Event(
             name=data["name"].strip(),
             date=data["date"],
@@ -116,11 +141,26 @@ def create_event():
             budget=budget,
             image_url=image_url,
             user_id=user_id,
+            organizer_id=organizer_id,
             progress=0
         )
 
         db.session.add(event)
         db.session.commit()
+
+        # Notify Organizer
+        if organizer_id:
+            try:
+                from app.api.payments import create_notification
+                create_notification(
+                    organizer_id,
+                    "📅 New Event Assignment",
+                    f"A new event '{event.name}' has been assigned to you. Review the details and respond.",
+                    "priority",
+                    {"event_id": event.id, "action": "assignment_review"}
+                )
+            except Exception as e:
+                print(f"Organizer notification failed: {e}")
 
         suggestions = generate_ai_suggestions(event.vendor_category, event.budget)
 
@@ -142,18 +182,26 @@ def create_event():
 def update_event(event_id):
     try:
         user_id = get_jwt_identity()
-        event = Event.query.filter_by(id=event_id, user_id=user_id).first()
+        # Allow either the creator OR the assigned organizer to update
+        event = Event.query.filter(
+            Event.id == event_id,
+            db.or_(Event.user_id == user_id, Event.organizer_id == user_id)
+        ).first()
 
         if not event:
-            return jsonify({"error": "Event not found"}), 404
+            return jsonify({"error": "Event not found or unauthorized"}), 404
 
         data = request.get_json()
         if not data:
             return jsonify({"error": "Invalid JSON"}), 400
 
-        for field in ["name", "date", "venue", "vendor_category", "budget"]:
+        # Protected fields (only owner/admin maybe, but for now let's allow organizer too)
+        for field in ["name", "date", "venue", "vendor_category", "budget", "progress"]:
             if field in data and str(data[field]).strip():
-                setattr(event, field, data[field])
+                if field == "budget" or field == "progress":
+                    setattr(event, field, float(data[field]))
+                else:
+                    setattr(event, field, data[field])
 
         db.session.commit()
         
@@ -184,9 +232,9 @@ def update_event(event_id):
 def assign_vendor(event_id):
     try:
         user_id = get_jwt_identity()
-        organizer = User.query.get(user_id)
-        if not organizer:
-            return jsonify({"error": "Organizer not found"}), 404
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
         data = request.get_json()
         vendor_id = data.get("vendor_id")
@@ -197,9 +245,14 @@ def assign_vendor(event_id):
         if not vendor or vendor.role != "vendor":
             return jsonify({"error": "Vendor not found"}), 404
 
-        event = Event.query.filter_by(id=event_id, user_id=user_id).first()
+        # Allow either creator OR assigned organizer
+        event = Event.query.filter(
+            Event.id == event_id,
+            db.or_(Event.user_id == user_id, Event.organizer_id == user_id)
+        ).first()
+        
         if not event:
-            return jsonify({"error": "Event not found or not owned by you"}), 404
+            return jsonify({"error": "Event not found or unauthorized"}), 404
 
         vendor.assigned_event = event_id
         db.session.commit()
@@ -286,3 +339,48 @@ def get_venue_suggestions():
     except Exception as e:
         print(f"❌ Error in venue suggestions: {e}")
         return jsonify({"suggestions": []})
+
+# ✅ Respond to an organizer assignment (Accept/Reject)
+@events_bp.route("/<int:event_id>/respond-assignment", methods=["POST"])
+@jwt_required()
+def respond_assignment(event_id):
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        status = data.get("status") # 'accepted' or 'rejected'
+
+        if status not in ["accepted", "rejected"]:
+            return jsonify({"error": "Invalid status. Must be 'accepted' or 'rejected'."}), 400
+
+        # Verify that this user IS the assigned organizer
+        event = Event.query.filter_by(id=event_id, organizer_id=user_id).first()
+        if not event:
+            return jsonify({"error": "Assignment not found or unauthorized"}), 404
+
+        event.organizer_status = status
+        db.session.commit()
+
+        # Notify the Event Creator
+        try:
+            from app.api.payments import create_notification
+            icon = "✅" if status == "accepted" else "❌"
+            msg = f"Your event expert '{event.organizer.name}' has {status} the assignment for '{event.name}'."
+            create_notification(
+                event.user_id,
+                f"{icon} Assignment {status.capitalize()}",
+                msg,
+                "success" if status == "accepted" else "warning",
+                {"event_id": event.id}
+            )
+        except Exception as e:
+            print(f"Creator notification failed: {e}")
+
+        return jsonify({
+            "message": f"Assignment {status} successfully",
+            "status": status
+        }), 200
+
+    except Exception as e:
+        print(f"❌ Error in respond_assignment: {str(e)}")
+        db.session.rollback()
+        return jsonify({"error": "Internal server error"}), 500

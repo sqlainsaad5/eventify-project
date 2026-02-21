@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   Bell,
 } from "lucide-react"
+import { NotificationBell } from "@/components/notification-bell"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +49,14 @@ export function VendorLayout({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<any[]>([])
 
   useEffect(() => {
+    const role = localStorage.getItem("role")
+
+    // Security Layer: Only Vendors can access this workspace
+    if (role && role !== "vendor") {
+      router.replace("/dashboard")
+      return
+    }
+
     const user = JSON.parse(localStorage.getItem("user") || "{}")
     if (user?.name) {
       setUserName(user.name)
@@ -304,64 +313,7 @@ export function VendorLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="ml-auto flex items-center gap-3">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative text-slate-500 hover:text-slate-900 rounded-xl">
-                    <Bell className="h-5 w-5" />
-                    {notifications.filter(n => !n.is_read).length > 0 && (
-                      <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center bg-red-500 border-2 border-white text-white text-[10px] font-black rounded-full animate-in zoom-in duration-300">
-                        {notifications.filter(n => !n.is_read).length}
-                      </span>
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80 rounded-[20px] p-2 shadow-2xl border-none ring-1 ring-black/5 bg-white/95 backdrop-blur-xl">
-                  <DropdownMenuLabel className="px-3 py-2 text-xs font-black text-slate-400 uppercase tracking-widest">
-                    Notifications
-                  </DropdownMenuLabel>
-                  <div className="max-h-80 overflow-y-auto px-1 space-y-1">
-                    {notifications.length > 0 ? (
-                      notifications.slice(0, 10).map((n) => (
-                        <DropdownMenuItem
-                          key={n.id}
-                          onClick={() => markAsRead(n)}
-                          className={cn(
-                            "flex flex-col items-start gap-1 p-3 rounded-xl cursor-pointer transition-all border-none focus:bg-slate-50",
-                            n.is_read ? "opacity-40" : "bg-purple-50/40"
-                          )}
-                        >
-                          <div className="flex items-center justify-between w-full">
-                            <span className="font-bold text-xs text-slate-900">{n.title}</span>
-                            {!n.is_read && <span className="w-1.5 h-1.5 bg-purple-600 rounded-full" />}
-                          </div>
-                          <p className="text-[11px] text-slate-500 leading-snug font-medium">{n.message}</p>
-                          <span className="text-[9px] text-slate-400 font-bold uppercase mt-1">
-                            {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </DropdownMenuItem>
-                      ))
-                    ) : (
-                      <div className="py-10 text-center flex flex-col items-center gap-2">
-                        <div className="p-3 bg-slate-50 rounded-full">
-                          <Bell className="h-5 w-5 text-slate-300" />
-                        </div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Empty Inbox</p>
-                      </div>
-                    )}
-                  </div>
-                  {notifications.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator className="bg-slate-100 my-2 mx-2" />
-                      <DropdownMenuItem
-                        onClick={clearAllNotifications}
-                        className="justify-center text-[10px] font-black text-purple-600 hover:text-purple-700 uppercase tracking-widest py-2.5 cursor-pointer rounded-xl focus:bg-purple-50"
-                      >
-                        Clear All Notifications
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <NotificationBell />
 
               <div className="h-8 w-px bg-slate-200/60 mx-1" />
 
@@ -377,7 +329,7 @@ export function VendorLayout({ children }: { children: React.ReactNode }) {
 
         {/* Page Content */}
         <main className="p-6 md:p-8 max-w-7xl mx-auto">{children}</main>
-      </div>
-    </div>
+      </div >
+    </div >
   )
 }

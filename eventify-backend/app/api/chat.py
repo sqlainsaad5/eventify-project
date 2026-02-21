@@ -114,8 +114,9 @@ def get_vendor_conversations():
         
         conversations = []
         for event in assigned_events:
-            # Get organizer info
-            organizer = User.query.get(event.user_id)
+            # Use assigned organizer when accepted; otherwise event owner (client)
+            partner_id = event.organizer_id if (event.organizer_id and event.organizer_status == 'accepted') else event.user_id
+            organizer = User.query.get(partner_id)
             if not organizer:
                 continue
             
@@ -149,53 +150,135 @@ def get_vendor_conversations():
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 
-# ✅ Get organizer's chat conversations
+# ✅ Consolidated Organizer Hub: Client & Vendor Conversations
 @chat_bp.route("/organizer/conversations", methods=["GET"])
 @jwt_required()
-def get_organizer_conversations():
+def get_organizer_all_conversations():
     try:
         current_user_id = get_jwt_identity()
-        
-        # Get all events created by this organizer
-        organizer_events = Event.query.filter_by(user_id=current_user_id).all()
-        
         conversations = []
-        for event in organizer_events:
-            # Get vendors assigned to this event
-            assigned_vendors = event.assigned_vendors
-            
-            for vendor in assigned_vendors:
-                # Get last message for this SPECIFIC event with vendor
-                last_message = ChatMessage.query.filter_by(
-                    event_id=event.id
-                ).filter(
-                    (ChatMessage.sender_id == vendor.id) | 
-                    (ChatMessage.sender_id == current_user_id)
+
+        # 1. Conversations with CLIENTS (where this user is the ASSIGNED Organizer)
+        assigned_to_me = Event.query.filter_by(organizer_id=current_user_id, organizer_status='accepted').all()
+        for event in assigned_to_me:
+            client = User.query.get(event.user_id)
+            if client:
+                # Only messages between organizer and this client (not vendor messages in same event)
+                last_msg = ChatMessage.query.filter_by(event_id=event.id).filter(
+                    or_(
+                        and_(ChatMessage.sender_id == current_user_id, ChatMessage.receiver_id == client.id),
+                        and_(ChatMessage.sender_id == client.id, ChatMessage.receiver_id == current_user_id)
+                    )
+                ).order_by(ChatMessage.created_at.desc()).first()
+                unread = ChatMessage.query.filter_by(
+                    event_id=event.id,
+                    sender_id=client.id,
+                    receiver_id=current_user_id,
+                    is_read=False
+                ).count()
+                conversations.append({
+                    "event_id": event.id,
+                    "event_name": event.name,
+                    "partner_id": client.id,
+                    "partner_name": client.name,
+                    "partner_email": client.email,
+                    "partner_role": "user", # Client
+                    "last_message": last_msg.message if last_msg else "No messages yet",
+                    "last_message_time": last_msg.created_at.isoformat() if last_msg else None,
+                    "unread_count": unread
+                })
+
+        # 2. Conversations with VENDORS (where this user OWNED the event or is managing it and assigned vendors)
+        # Note: We already allow organziers to manage events they are assigned to. 
+        # So we should look at all events where this user is either the creator OR the accepted organizer.
+        managed_events = Event.query.filter(
+            or_(
+                Event.user_id == current_user_id,
+                and_(Event.organizer_id == current_user_id, Event.organizer_status == 'accepted')
+            )
+        ).all()
+
+        for event in managed_events:
+            for vendor in event.assigned_vendors:
+                last_msg = ChatMessage.query.filter_by(event_id=event.id).filter(
+                    or_(
+                        and_(ChatMessage.sender_id == vendor.id, ChatMessage.receiver_id == current_user_id),
+                        and_(ChatMessage.sender_id == current_user_id, ChatMessage.receiver_id == vendor.id)
+                    )
                 ).order_by(ChatMessage.created_at.desc()).first()
                 
-                # Count unread messages from vendor to organizer FOR THIS EVENT
-                unread_count = ChatMessage.query.filter_by(
+                unread = ChatMessage.query.filter_by(
                     event_id=event.id,
                     sender_id=vendor.id,
                     receiver_id=current_user_id,
                     is_read=False
                 ).count()
-                
+
                 conversations.append({
                     "event_id": event.id,
                     "event_name": event.name,
-                    "vendor_id": vendor.id,
-                    "vendor_name": vendor.name,
-                    "vendor_email": vendor.email,
-                    "last_message": last_message.message if last_message else "No messages yet",
-                    "last_message_time": last_message.created_at.isoformat() if last_message else None,
-                    "unread_count": unread_count
+                    "partner_id": vendor.id,
+                    "partner_name": vendor.name,
+                    "partner_email": vendor.email,
+                    "partner_role": "vendor",
+                    "last_message": last_msg.message if last_msg else "No messages yet",
+                    "last_message_time": last_msg.created_at.isoformat() if last_msg else None,
+                    "unread_count": unread
                 })
-        
+
         return jsonify({"conversations": conversations}), 200
         
     except Exception as e:
-        print(f"Error fetching organizer conversations: {str(e)}")
+        print(f"Error fetching consolidated organizer conversations: {str(e)}")
+        return jsonify({"error": "Failed to fetch conversations"}), 500
+
+
+# ✅ Get regular User's chat conversations (with their assigned Organizers)
+@chat_bp.route("/user/conversations", methods=["GET"])
+@jwt_required()
+def get_user_conversations():
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Get all events created by this user that have an accepted organizer
+        user_events = Event.query.filter_by(user_id=current_user_id).filter(
+            Event.organizer_id != None,
+            Event.organizer_status == 'accepted'
+        ).all()
+        
+        conversations = []
+        for event in user_events:
+            organizer = User.query.get(event.organizer_id)
+            if not organizer:
+                continue
+            
+            # Get last message for this SPECIFIC event
+            last_message = ChatMessage.query.filter_by(event_id=event.id)\
+                .order_by(ChatMessage.created_at.desc())\
+                .first()
+            
+            unread_count = ChatMessage.query.filter_by(
+                event_id=event.id,
+                receiver_id=current_user_id,
+                is_read=False
+            ).count()
+            
+            conversations.append({
+                "event_id": event.id,
+                "event_name": event.name,
+                "partner_id": organizer.id,
+                "partner_name": organizer.name,
+                "partner_email": organizer.email,
+                "partner_role": "organizer",
+                "last_message": last_message.message if last_message else "No messages yet",
+                "last_message_time": last_message.created_at.isoformat() if last_message else None,
+                "unread_count": unread_count
+            })
+            
+        return jsonify({"conversations": conversations}), 200
+        
+    except Exception as e:
+        print(f"Error fetching user conversations: {str(e)}")
         return jsonify({"error": "Failed to fetch conversations"}), 500
 
 

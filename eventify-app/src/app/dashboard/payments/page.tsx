@@ -44,6 +44,7 @@ interface Event {
   payment_status: "unpaid" | "deposit_paid" | "partially_paid" | "fully_paid"
   deposit_amount?: number
   vendor_payments_total?: number
+  organizer_id?: number | null
 }
 
 interface PaymentRequest {
@@ -58,20 +59,53 @@ interface PaymentRequest {
   event_name: string
 }
 
+interface OrganizerPaymentRequest {
+  id: number
+  event_id: number
+  event_name: string
+  organizer_id: number
+  organizer_name: string
+  amount: number
+  currency: string
+  description: string
+  status: "pending" | "paid" | "rejected"
+  created_at: string
+  paid_at: string | null
+}
+
 export default function PaymentsPage() {
   const router = useRouter()
   const [payments, setPayments] = useState<Payment[]>([])
   const [events, setEvents] = useState<Event[]>([])
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([])
+  const [organizerRequests, setOrganizerRequests] = useState<OrganizerPaymentRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<number | null>(null)
-  const [activeTab, setActiveTab] = useState<"payments" | "requests">("payments")
+  const [activeTab, setActiveTab] = useState<"payments" | "requests" | "organizer">("payments")
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
   const [currentClientSecret, setCurrentClientSecret] = useState("")
   const [currentAmount, setCurrentAmount] = useState(0)
   const [currentPaymentId, setCurrentPaymentId] = useState<number | null>(null)
+  const [organizerForm, setOrganizerForm] = useState({ event_id: "", amount: "", description: "Coordination fee" })
+  const [organizerSubmitting, setOrganizerSubmitting] = useState(false)
 
   const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
+  const getUserId = (): number | null => {
+    try {
+      const u = localStorage.getItem("user")
+      if (!u) return null
+      const parsed = JSON.parse(u)
+      return parsed?.id ?? parsed?._id ?? null
+    } catch { return null }
+  }
+
+  // Clear organizer form event selection if that event is already paid (e.g. after refetch)
+  useEffect(() => {
+    const paidEventIds = organizerRequests.filter((r) => r.status === "paid").map((r) => r.event_id)
+    if (organizerForm.event_id && paidEventIds.includes(parseInt(organizerForm.event_id, 10))) {
+      setOrganizerForm((f) => ({ ...f, event_id: "" }))
+    }
+  }, [organizerRequests])
 
   const loadData = async () => {
     const token = getToken()
@@ -79,10 +113,11 @@ export default function PaymentsPage() {
 
     try {
       setLoading(true)
-      const [eventsRes, paymentsRes, requestsRes] = await Promise.all([
+      const [eventsRes, paymentsRes, requestsRes, orgRequestsRes] = await Promise.all([
         fetch("http://localhost:5000/api/payments/events-with-payment-status", { headers: { "Authorization": `Bearer ${token}` } }),
         fetch("http://localhost:5000/api/payments", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:5000/api/payments/requests", { headers: { "Authorization": `Bearer ${token}` } })
+        fetch("http://localhost:5000/api/payments/requests", { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch("http://localhost:5000/api/payments/organizer-requests", { headers: { "Authorization": `Bearer ${token}` } })
       ])
 
       if (eventsRes.ok) setEvents(await eventsRes.json())
@@ -94,6 +129,10 @@ export default function PaymentsPage() {
         const d = await requestsRes.json()
         setPaymentRequests(d.requests || [])
       }
+      if (orgRequestsRes.ok) {
+        const d = await orgRequestsRes.json()
+        setOrganizerRequests(d.organizer_requests || [])
+      }
     } catch (err) {
       console.error(err)
     } finally {
@@ -103,15 +142,18 @@ export default function PaymentsPage() {
 
   useEffect(() => { loadData() }, [])
 
-  const handleCreatePayment = async (eventId: number, amount: number, requestId?: number) => {
+  const handleCreatePayment = async (eventId: number, amount: number, requestId?: number, organizerRequestId?: number) => {
     const token = getToken()
     if (!token) return
-    setProcessing(requestId || eventId)
+    setProcessing(organizerRequestId ?? requestId ?? eventId)
     try {
+      const body: Record<string, unknown> = { event_id: eventId, amount }
+      if (requestId != null) body.request_id = requestId
+      if (organizerRequestId != null) body.organizer_request_id = organizerRequestId
       const res = await fetch("http://localhost:5000/api/payments/create-payment-intent", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ event_id: eventId, amount, request_id: requestId })
+        body: JSON.stringify(body)
       })
       const data = await res.json()
       if (res.ok) {
@@ -119,11 +161,57 @@ export default function PaymentsPage() {
         setCurrentAmount(amount)
         setCurrentPaymentId(data.payment_id)
         setIsCheckoutOpen(true)
+      } else {
+        alert(data.error || "Failed to create payment")
       }
     } catch (err) {
       console.error(err)
     } finally {
       setProcessing(null)
+    }
+  }
+
+  const handleRejectOrganizerRequest = async (id: number) => {
+    const token = getToken()
+    if (!token) return
+    try {
+      const res = await fetch(`http://localhost:5000/api/payments/organizer-requests/${id}/reject`, {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${token}` }
+      })
+      if (res.ok) loadData()
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const handleSubmitOrganizerRequest = async () => {
+    const token = getToken()
+    const eid = organizerForm.event_id ? parseInt(organizerForm.event_id) : 0
+    const amount = parseFloat(organizerForm.amount)
+    if (!token || !eid || !amount || amount <= 0) return
+    setOrganizerSubmitting(true)
+    try {
+      const res = await fetch("http://localhost:5000/api/payments/organizer-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          event_id: eid,
+          amount,
+          description: organizerForm.description || "Coordination fee"
+        })
+      })
+      if (res.ok) {
+        setOrganizerForm({ event_id: "", amount: "", description: "Coordination fee" })
+        loadData()
+      } else {
+        const d = await res.json()
+        alert(d.error || "Failed to submit request")
+      }
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setOrganizerSubmitting(false)
     }
   }
 
@@ -220,18 +308,27 @@ export default function PaymentsPage() {
           </div>
         </div>
 
-        <div className="flex gap-2 bg-white p-2 rounded-[24px] border border-slate-100 max-w-sm">
+        <div className="flex gap-2 bg-white p-2 rounded-[24px] border border-slate-100 max-w-md">
           <button onClick={() => setActiveTab("payments")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "payments" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Projects</button>
-          <button onClick={() => setActiveTab("requests")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "requests" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Requests</button>
+          <button onClick={() => setActiveTab("requests")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "requests" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Vendor</button>
+          <button onClick={() => setActiveTab("organizer")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "organizer" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Organizer</button>
         </div>
 
-        {activeTab === "payments" ? (
+        {activeTab === "payments" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {events.map(event => (
-              <Card key={event.id} className="rounded-[32px] border-slate-100 shadow-sm overflow-hidden p-6 hover:shadow-2xl transition-all border hover:border-purple-200 group">
+            {events.map(event => {
+              const userId = getUserId()
+              const organizerPaid = userId != null && event.organizer_id === userId && organizerRequests.some((r: OrganizerPaymentRequest) => r.event_id === event.id && r.status === "paid")
+              return (
+              <Card key={event.id} className={`rounded-[32px] border-slate-100 shadow-sm overflow-hidden p-6 transition-all border group ${organizerPaid ? "opacity-85 border-slate-200 hover:shadow-lg" : "hover:shadow-2xl hover:border-purple-200"}`}>
                 <div className="flex justify-between items-start mb-4">
                   <h3 className="font-black text-slate-900 uppercase tracking-tight">{event.name}</h3>
-                  {getPaymentStatusBadge(event.payment_status)}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {organizerPaid && (
+                      <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Paid</Badge>
+                    )}
+                    {getPaymentStatusBadge(event.payment_status)}
+                  </div>
                 </div>
                 <div className="space-y-4">
                   <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -252,9 +349,10 @@ export default function PaymentsPage() {
                   )}
                 </div>
               </Card>
-            ))}
+            )})}
           </div>
-        ) : (
+        )}
+        {activeTab === "requests" && (
           <div className="space-y-4">
             {paymentRequests.length === 0 ? (
               <div className="text-center p-20 bg-slate-50 rounded-[40px] border-dashed border-2 border-slate-200">
@@ -296,6 +394,107 @@ export default function PaymentsPage() {
                 </Card>
               ))
             )}
+          </div>
+        )}
+        {activeTab === "organizer" && (
+          <div className="space-y-6">
+            {(() => {
+              const userId = getUserId()
+              const myEventsAsOwner = events.filter((e: any) => e.user_id === userId)
+              const myEventsAsOrganizer = events.filter(
+                (e: any) => e.organizer_id === userId && !organizerRequests.some((r: any) => r.event_id === e.id && r.status === "paid")
+              )
+              const pendingForMe = organizerRequests.filter(
+                (r) => r.status === "pending" && myEventsAsOwner.some((e: any) => e.id === r.event_id)
+              )
+              const myRequestsAsOrganizer = organizerRequests.filter((r) => r.organizer_id === userId)
+              return (
+                <>
+                  {pendingForMe.length > 0 && (
+                    <Card className="p-6 rounded-[32px] border-slate-100">
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Requests from organizer (pay now)</h3>
+                      <div className="space-y-4">
+                        {pendingForMe.map((r) => (
+                          <div key={r.id} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div>
+                              <p className="text-[10px] font-black text-slate-400 uppercase">{r.event_name}</p>
+                              <p className="font-bold text-slate-900">{r.organizer_name}</p>
+                              <p className="text-sm text-slate-500">{r.description}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xl font-black text-slate-900">{formatCurrency(r.amount)}</span>
+                              <Button
+                                onClick={() => handleCreatePayment(r.event_id, r.amount, undefined, r.id)}
+                                disabled={processing === r.id}
+                                className="h-10 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase"
+                              >
+                                {processing === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Pay"}
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-10 rounded-xl text-red-600" onClick={() => handleRejectOrganizerRequest(r.id)}>Reject</Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                  {myEventsAsOrganizer.length > 0 && (
+                    <Card className="p-6 rounded-[32px] border-slate-100">
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Request payment from client</h3>
+                      <div className="flex flex-wrap gap-3 items-end mb-6">
+                        <select
+                          value={organizerForm.event_id}
+                          onChange={(e) => setOrganizerForm((f) => ({ ...f, event_id: e.target.value }))}
+                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium min-w-[180px]"
+                        >
+                          <option value="">Select event</option>
+                          {myEventsAsOrganizer.map((e: any) => (
+                            <option key={e.id} value={e.id}>{e.name}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          placeholder="Amount"
+                          value={organizerForm.amount}
+                          onChange={(e) => setOrganizerForm((f) => ({ ...f, amount: e.target.value }))}
+                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium w-28"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Description"
+                          value={organizerForm.description}
+                          onChange={(e) => setOrganizerForm((f) => ({ ...f, description: e.target.value }))}
+                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium flex-1 min-w-[160px]"
+                        />
+                        <Button onClick={handleSubmitOrganizerRequest} disabled={organizerSubmitting || !organizerForm.event_id || !organizerForm.amount} className="h-11 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase">
+                          {organizerSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
+                        </Button>
+                      </div>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">Your requests</p>
+                      <div className="mt-2 space-y-2">
+                        {myRequestsAsOrganizer.length === 0 ? (
+                          <p className="text-sm text-slate-500">No requests yet.</p>
+                        ) : (
+                          myRequestsAsOrganizer.map((r) => (
+                            <div key={r.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                              <span className="font-medium text-slate-800">{r.event_name} — {formatCurrency(r.amount)}</span>
+                              <Badge className={r.status === "paid" ? "bg-emerald-100 text-emerald-700 font-semibold" : r.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}>
+                                {r.status === "paid" ? "Paid" : r.status === "rejected" ? "Rejected" : "Pending"}
+                              </Badge>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </Card>
+                  )}
+                  {pendingForMe.length === 0 && myEventsAsOrganizer.length === 0 && (
+                    <div className="text-center p-20 bg-slate-50 rounded-[40px] border-dashed border-2 border-slate-200">
+                      <Briefcase className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No organizer payment requests</p>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
           </div>
         )}
 

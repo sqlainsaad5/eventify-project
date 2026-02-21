@@ -18,21 +18,35 @@ import {
   Loader2
 } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+// Dashboard Version: 1.1.2 (Defensive Update)
+
 export default function DashboardPage() {
+  const router = useRouter()
   const [events, setEvents] = useState<any[]>([])
   const [paymentRequests, setPaymentRequests] = useState<any[]>([])
+  const [organizerRequests, setOrganizerRequests] = useState<any[]>([])
   const [userName, setUserName] = useState(() => {
     if (typeof window !== "undefined") {
-      const user = JSON.parse(localStorage.getItem("user") || "{}")
-      return user.name || "Organizer"
+      try {
+        const user = JSON.parse(localStorage.getItem("user") || "{}")
+        return user.name || "Organizer"
+      } catch {
+        return "Organizer"
+      }
     }
     return "Organizer"
   })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const savedRole = localStorage.getItem("role")
+    if (savedRole === "user") {
+      router.replace("/dashboard/profile")
+      return
+    }
     fetchDashboardData()
   }, [])
 
@@ -41,7 +55,7 @@ export default function DashboardPage() {
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
 
     try {
-      // 1. Fetch User Profile to get late-syncing Name
+      // 1. Fetch User Profile
       const userRes = await fetch("http://localhost:5000/api/auth/me", {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -51,21 +65,51 @@ export default function DashboardPage() {
         localStorage.setItem("user", JSON.stringify(userData))
       }
 
-      // 2. Fetch Events and Payments
-      const [eventsRes, paymentsRes] = await Promise.all([
+      // 2. Fetch Events, Payments, and Organizer Requests
+      const [eventsRes, paymentsRes, organizerRequestsRes] = await Promise.all([
         fetch("http://localhost:5000/api/events", {
           headers: { Authorization: `Bearer ${token}` }
         }),
         fetch("http://localhost:5000/api/payments/requests", {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch("http://localhost:5000/api/payments/organizer-requests", {
           headers: { Authorization: `Bearer ${token}` }
         })
       ])
 
       const eventsData = await eventsRes.json()
       const paymentsData = await paymentsRes.json()
+      const organizerRequestsData = organizerRequestsRes.ok ? await organizerRequestsRes.json() : {}
 
-      if (eventsRes.ok) setEvents(eventsData)
-      if (paymentsRes.ok) setPaymentRequests(paymentsData.requests || [])
+      console.log("Dashboard Debug - Events Raw Data:", eventsData)
+
+      if (eventsRes.ok) {
+        let normalizedEvents = []
+        if (Array.isArray(eventsData)) {
+          normalizedEvents = eventsData
+        } else if (eventsData && typeof eventsData === 'object') {
+          normalizedEvents = [
+            ...(eventsData.created || []),
+            ...(eventsData.assigned || [])
+          ]
+        }
+
+        // Final protection: ensure it's an array and remove duplicates
+        const finalEvents = Array.isArray(normalizedEvents)
+          ? Array.from(new Map(normalizedEvents.filter(e => e && e.id).map(e => [e.id, e])).values())
+          : []
+
+        setEvents(finalEvents)
+      }
+
+      if (paymentsRes.ok) {
+        setPaymentRequests(paymentsData.requests || [])
+      }
+
+      if (organizerRequestsRes.ok) {
+        setOrganizerRequests(organizerRequestsData.organizer_requests || [])
+      }
 
     } catch (error) {
       console.error("Dashboard fetch error:", error)
@@ -75,14 +119,27 @@ export default function DashboardPage() {
     }
   }
 
-  // Calculate Metrics
-  const totalBudget = events.reduce((sum, e) => sum + (e.budget || 0), 0)
-  const pendingRequests = paymentRequests.filter(r => r.status === "pending").length
-  const totalVendors = new Set(events.flatMap(e => e.assigned_vendors || [])).size
-  const sortedUpcoming = [...events]
-    .filter(e => new Date(e.date) >= new Date())
+  // Calculate Metrics with Type Checks
+  const eventList = Array.isArray(events) ? events : []
+  const paymentRequestList = Array.isArray(paymentRequests) ? paymentRequests : []
+
+  const totalBudget = eventList.reduce((sum, e) => sum + (Number(e?.budget) || 0), 0)
+  const pendingRequests = paymentRequestList.filter(r => r?.status === "pending").length
+  const totalVendors = new Set(eventList.flatMap(e => e?.assigned_vendors || [])).size
+
+  const sortedUpcoming = [...eventList]
+    .filter(e => e?.date && new Date(e.date) >= new Date())
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 3)
+
+  const getUserId = (): number | null => {
+    try {
+      const u = localStorage.getItem("user")
+      if (!u) return null
+      const parsed = JSON.parse(u)
+      return parsed?.id ?? parsed?._id ?? null
+    } catch { return null }
+  }
 
   if (loading) {
     return (
@@ -100,7 +157,6 @@ export default function DashboardPage() {
   return (
     <DashboardLayout>
       <div className="space-y-10">
-        {/* Welcome Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome back, {userName}! 👋</h1>
@@ -116,11 +172,10 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Vital Stats */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
           <StatCard
             title="Total Events"
-            value={events.length.toString()}
+            value={eventList.length.toString()}
             trend="Active projects"
             icon={<Calendar className="h-5 w-5 text-blue-600" />}
             bgColor="bg-blue-50"
@@ -154,7 +209,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Recent Events List */}
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-slate-900">Upcoming Schedule</h2>
@@ -167,20 +221,26 @@ export default function DashboardPage() {
 
             <div className="grid gap-4">
               {sortedUpcoming.length > 0 ? (
-                sortedUpcoming.map((event) => (
-                  <Card key={event.id} className="group hover:border-purple-200 hover:shadow-md transition-all duration-200 overflow-hidden border-slate-200/60 rounded-2xl">
+                sortedUpcoming.map((event) => {
+                  const userId = getUserId()
+                  const organizerPaid = userId != null && event?.organizer_id === userId && organizerRequests.some((r: any) => r.event_id === event.id && r.status === "paid")
+                  return (
+                  <Card key={event.id} className={`group transition-all duration-200 overflow-hidden rounded-2xl ${organizerPaid ? "opacity-85 border-slate-200 border hover:shadow-sm" : "border-slate-200/60 border hover:border-purple-200 hover:shadow-md"}`}>
                     <div className="flex items-center p-5">
                       <div className={`w-1.5 h-10 rounded-full bg-purple-600 mr-5`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="font-bold text-slate-900 truncate">{event.name}</h3>
+                          {organizerPaid && (
+                            <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Paid</Badge>
+                          )}
                           <Badge variant="secondary" className="bg-purple-50 text-purple-600 border-none text-[10px] uppercase font-bold px-1.5 py-0">
                             {event.progress === 100 ? "Completed" : event.progress > 0 ? "In Progress" : "Planning"}
                           </Badge>
                         </div>
                         <div className="flex flex-wrap gap-x-4 gap-y-1">
                           <p className="text-xs text-slate-500 flex items-center gap-1">
-                            <Clock className="h-3 w-3" /> {new Date(event.date).toLocaleDateString()}
+                            <Clock className="h-3 w-3" /> {event.date ? new Date(event.date).toLocaleDateString() : 'N/A'}
                           </p>
                           <p className="text-xs text-slate-500 flex items-center gap-1">
                             <MapPin className="h-3 w-3" /> {event.venue}
@@ -194,7 +254,7 @@ export default function DashboardPage() {
                       </Link>
                     </div>
                   </Card>
-                ))
+                )})
               ) : (
                 <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
                   <Calendar className="h-10 w-10 text-slate-300 mx-auto mb-3" />
@@ -207,7 +267,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* AI Insights Sidebar */}
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900">Intelligent Insights</h2>
             <Card className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white border-none shadow-xl shadow-purple-200 ring-1 ring-white/20 rounded-[32px] overflow-hidden">
@@ -220,8 +279,8 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-indigo-50/90 leading-relaxed italic">
-                  {events.length > 0
-                    ? `You have ${events.length} active projects. Using dynamic vendor assignments could reduce overhead by 12% across your schedule.`
+                  {eventList.length > 0
+                    ? `You have ${eventList.length} active projects. Using dynamic vendor assignments could reduce overhead by 12% across your schedule.`
                     : "Plan your first event to receive personalized AI recommendations on budgeting and venue selection."
                   }
                 </p>

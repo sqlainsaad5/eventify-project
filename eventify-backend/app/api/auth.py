@@ -79,12 +79,17 @@ def google_callback():
         # Find or create user
         user = User.query.filter_by(email=email).first()
         
-        if not user:
+        if user:
+            # Check if role is allowed for Google Login
+            if user.role != "user":
+                params = {"error": "Google login is only available for User roles. Organizers and Vendors must use email/password."}
+                return redirect(f"http://localhost:3000/login?{urlencode(params)}")
+        else:
             # Create new user with Google OAuth
             user = User(
                 name=name,
                 email=email,
-                role="organizer"  # Default role, you can modify this
+                role="user"  # Default role for Google login
             )
             # For OAuth users, we don't set a password
             user.password_hash = None
@@ -306,3 +311,13 @@ def login():
         "user": user.to_dict(),
         "token": token
     }), 200
+@auth_bp.route("/organizers", methods=["GET"])
+@jwt_required()
+def get_organizers():
+    """Get all users with the 'organizer' role"""
+    try:
+        organizers = User.query.filter_by(role='organizer').all()
+        return jsonify([o.to_dict() for o in organizers]), 200
+    except Exception as e:
+        print(f"❌ Error fetching organizers: {e}")
+        return jsonify({"error": str(e)}), 500

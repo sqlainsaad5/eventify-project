@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import User, Event, db, PaymentRequest, Payment
+from app.models import User, Event, db, PaymentRequest, Payment, OrganizerPaymentRequest, VendorEventVerification
+from sqlalchemy import or_, and_
 from datetime import datetime
 import stripe
 from app.config import Config
@@ -59,25 +60,23 @@ def handle_payment_success(payment_intent):
         
     payment_id = metadata.get("payment_id")
     request_id = metadata.get("request_id")
-    
-    print(f"💰 Processing successful payment context: payment_id={payment_id}, request_id={request_id}")
-    
+    organizer_request_id = metadata.get("organizer_request_id")
+
+    print(f"💰 Processing successful payment context: payment_id={payment_id}, request_id={request_id}, organizer_request_id={organizer_request_id}")
+
     if payment_id:
         try:
             payment = Payment.query.get(int(payment_id))
             if payment:
                 payment.status = "completed"
-                # Use getattr for robustness if it's a Stripe object
                 payment.transaction_id = getattr(payment_intent, 'id', payment_intent.get('id', 'N/A'))
                 payment.payment_date = datetime.now()
-                
-                # If this was a vendor settlement, mark the request as paid
+
                 if request_id:
                     pr = PaymentRequest.query.get(int(request_id))
                     if pr:
                         pr.status = 'paid'
                         print(f"✅ Vendor settlement (Request {request_id}) marked as PAID")
-                        # Notify Vendor
                         create_notification(
                             pr.vendor_id,
                             "💰 Payment Received!",
@@ -85,10 +84,25 @@ def handle_payment_success(payment_intent):
                             "payment",
                             {"request_id": pr.id}
                         )
-                
+
+                if organizer_request_id:
+                    opr = OrganizerPaymentRequest.query.get(int(organizer_request_id))
+                    if opr:
+                        opr.status = 'paid'
+                        opr.paid_at = datetime.now()
+                        opr.payment_id = payment.id
+                        print(f"✅ Organizer request {organizer_request_id} marked as PAID")
+                        create_notification(
+                            opr.organizer_id,
+                            "💰 Payment Received",
+                            f"Your payment request for '{opr.event.name}' has been paid by the client.",
+                            "payment",
+                            {"organizer_request_id": opr.id}
+                        )
+
                 db.session.commit()
                 print(f"✨ Payment {payment_id} marked as COMPLETED in database")
-                create_notification(payment.event.user_id, "✅ Payment Verified", f"Funds successfully processed via Stripe.", "success")
+                create_notification(payment.event.user_id, "✅ Payment Verified", "Funds successfully processed via Stripe.", "success")
                 return True
             else:
                 print(f"❌ Payment ID {payment_id} not found in database")
@@ -115,35 +129,59 @@ def handle_payment_failure(payment_intent):
 @jwt_required()
 def create_payment_intent():
     try:
-        user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         data = request.get_json()
         event_id = data.get('event_id')
         amount = data.get('amount')
-        request_id = data.get('request_id') # Optional: for vendor settlement
+        request_id = data.get('request_id')  # Optional: for vendor settlement
+        organizer_request_id = data.get('organizer_request_id')  # Optional: owner paying organizer
 
-        print(f"🔄 Creating intent for Event {event_id}, Amount {amount}")
+        print(f"🔄 Creating intent for Event {event_id}, Amount {amount}, request_id={request_id}, organizer_request_id={organizer_request_id}")
 
-        event = Event.query.filter_by(id=event_id, user_id=user_id).first()
-        if not event: return jsonify({"error": "Event not found"}), 404
+        event = Event.query.get(event_id)
+        if not event:
+            return jsonify({"error": "Event not found"}), 404
+
+        if organizer_request_id:
+            opr = OrganizerPaymentRequest.query.get(organizer_request_id)
+            if not opr:
+                return jsonify({"error": "Organizer payment request not found"}), 404
+            if opr.event_id != event_id or opr.status != 'pending':
+                return jsonify({"error": "Invalid or already paid organizer request"}), 400
+            if event.user_id != current_user_id:
+                return jsonify({"error": "Only the event owner can pay the organizer"}), 403
+            amount = float(opr.amount)
+        elif request_id:
+            pr = PaymentRequest.query.get(request_id)
+            if not pr:
+                return jsonify({"error": "Payment request not found"}), 404
+            if pr.event_id != event_id or pr.status != 'approved':
+                return jsonify({"error": "Invalid or not approved payment request"}), 400
+            if event.user_id != current_user_id and event.organizer_id != current_user_id:
+                return jsonify({"error": "Unauthorized: only event owner or organizer can settle this request"}), 403
+        else:
+            if event.user_id != current_user_id:
+                return jsonify({"error": "Event not found"}), 404
 
         payment = Payment(
-            event_id=event_id, 
-            amount=float(amount), 
-            currency="USD", 
-            status="pending", 
+            event_id=event_id,
+            amount=float(amount),
+            currency="USD",
+            status="pending",
             payment_method="card"
         )
         db.session.add(payment)
         db.session.commit()
 
-        # Build metadata - MUST BE STRINGS OR NUMBERS for Stripe
         meta = {
-            "payment_id": str(payment.id), 
-            "event_id": str(event_id), 
-            "user_id": str(user_id)
+            "payment_id": str(payment.id),
+            "event_id": str(event_id),
+            "user_id": str(current_user_id)
         }
         if request_id:
             meta["request_id"] = str(request_id)
+        if organizer_request_id:
+            meta["organizer_request_id"] = str(organizer_request_id)
 
         intent = stripe.PaymentIntent.create(
             amount=int(float(amount) * 100),
@@ -163,8 +201,16 @@ def create_payment_intent():
 @jwt_required()
 def get_payments():
     user_id = get_jwt_identity()
-    payments = Payment.query.join(Event).filter(Event.user_id == int(user_id)).all()
-    return jsonify({"payments": [p.to_dict() for p in payments]}), 200
+    payments = Payment.query.join(Event).filter(
+        or_(Event.user_id == int(user_id), Event.organizer_id == int(user_id))
+    ).all()
+    payments_list = []
+    for p in payments:
+        d = p.to_dict()
+        opr = OrganizerPaymentRequest.query.filter_by(payment_id=p.id).first()
+        d["payment_type"] = "organizer" if opr else None
+        payments_list.append(d)
+    return jsonify({"payments": payments_list}), 200
 
 @payments_bp.route("/authorize-verify/<int:payment_id>", methods=["POST"])
 @jwt_required()
@@ -194,14 +240,18 @@ def verify_payment_manual(payment_id):
 @jwt_required()
 def get_payment_requests():
     user_id = get_jwt_identity()
-    requests = PaymentRequest.query.join(Event).filter(Event.user_id == user_id).all()
+    requests = PaymentRequest.query.join(Event).filter(
+        or_(Event.user_id == user_id, Event.organizer_id == user_id)
+    ).all()
     return jsonify({"requests": [r.to_dict() for r in requests]}), 200
 
 @payments_bp.route("/events-with-payment-status", methods=["GET"])
 @jwt_required()
 def get_events_with_payment_status():
     user_id = get_jwt_identity()
-    events = Event.query.filter_by(user_id=user_id).all()
+    events = Event.query.filter(
+        or_(Event.user_id == user_id, Event.organizer_id == user_id)
+    ).all()
     results = []
     for event in events:
         cp = Payment.query.filter_by(event_id=event.id, status='completed').all()
@@ -233,27 +283,56 @@ def get_events_with_payment_status():
 def request_payment():
     user_id = get_jwt_identity()
     data = request.get_json()
-    pr = PaymentRequest(event_id=data['event_id'], vendor_id=user_id, amount=float(data['amount']), description=data.get('description',''), status='pending')
+    event_id = data.get("event_id")
+    if not event_id:
+        return jsonify({"error": "event_id required"}), 400
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    vendor = User.query.get(user_id)
+    if not vendor or vendor.role != "vendor":
+        return jsonify({"error": "Only vendors can submit payment requests"}), 403
+    if event not in vendor.assigned_events:
+        return jsonify({"error": "You are not assigned to this event"}), 403
+    verification = VendorEventVerification.query.filter_by(event_id=event_id, vendor_id=user_id).first()
+    if not verification:
+        return jsonify({
+            "error": "Complete your work and wait for the organizer to verify before requesting payment."
+        }), 403
+
+    existing = PaymentRequest.query.filter_by(
+        event_id=event_id,
+        vendor_id=user_id
+    ).filter(PaymentRequest.status.in_(['pending', 'approved'])).first()
+    if existing:
+        return jsonify({
+            "error": "You have already submitted a payment request for this event. Wait for it to be paid or declined."
+        }), 403
+
+    pr = PaymentRequest(event_id=event_id, vendor_id=user_id, amount=float(data['amount']), description=data.get('description', ''), status='pending')
     db.session.add(pr)
     db.session.commit()
-    
-    # Notify Organizer
-    event = Event.query.get(data['event_id'])
-    if event:
-        create_notification(
-            event.user_id,
-            "💸 Payment Request",
-            f"Vendor has requested ${data['amount']} for '{event.name}'.",
-            "payment",
-            {"request_id": pr.id, "event_id": event.id}
-        )
-    
+
+    notify_id = event.organizer_id if event.organizer_id is not None else event.user_id
+    create_notification(
+        notify_id,
+        "Payment Request",
+        f"Vendor has requested ${data['amount']} for '{event.name}'.",
+        "payment",
+        {"request_id": pr.id, "event_id": event.id}
+    )
+
     return jsonify({"message": "Request submitted"}), 201
 
 @payments_bp.route("/requests/<int:rid>/approve", methods=["PUT"])
 @jwt_required()
 def approve_request(rid):
+    current_user_id = int(get_jwt_identity())
     pr = PaymentRequest.query.get(rid)
+    if not pr:
+        return jsonify({"error": "Request not found"}), 404
+    if pr.event.user_id != current_user_id and (pr.event.organizer_id is None or pr.event.organizer_id != current_user_id):
+        return jsonify({"error": "Unauthorized"}), 403
     pr.status = 'approved'
     db.session.commit()
     
@@ -271,7 +350,12 @@ def approve_request(rid):
 @payments_bp.route("/requests/<int:rid>/reject", methods=["PUT"])
 @jwt_required()
 def reject_request(rid):
+    current_user_id = int(get_jwt_identity())
     pr = PaymentRequest.query.get(rid)
+    if not pr:
+        return jsonify({"error": "Request not found"}), 404
+    if pr.event.user_id != current_user_id and (pr.event.organizer_id is None or pr.event.organizer_id != current_user_id):
+        return jsonify({"error": "Unauthorized"}), 403
     pr.status = 'rejected'
     db.session.commit()
     
@@ -289,12 +373,88 @@ def reject_request(rid):
 @payments_bp.route("/requests/<int:rid>/process-payment", methods=["POST"])
 @jwt_required()
 def process_settlement(rid):
-    # This now just returns a message to use the checkout flow
-    # Frontend should call create-payment-intent with request_id instead
     return jsonify({
         "message": "Use /create-payment-intent with request_id to settle via Stripe",
         "request_id": rid
     }), 200
+
+
+# --- ORGANIZER PAYMENT REQUESTS (Phase 3) ---
+
+@payments_bp.route("/organizer-request", methods=["POST"])
+@jwt_required()
+def create_organizer_payment_request():
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json()
+    event_id = data.get("event_id")
+    amount = float(data.get("amount", 0))
+    description = data.get("description", "") or "Organizer fee / coordination"
+    if not event_id or amount <= 0:
+        return jsonify({"error": "event_id and positive amount required"}), 400
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    if event.organizer_id != current_user_id:
+        return jsonify({"error": "Only the assigned organizer can request payment for this event"}), 403
+    existing_paid = OrganizerPaymentRequest.query.filter_by(
+        event_id=event_id, organizer_id=current_user_id, status="paid"
+    ).first()
+    if existing_paid:
+        return jsonify({
+            "error": "This event has already been paid by the client. You cannot submit another payment request for it."
+        }), 403
+    opr = OrganizerPaymentRequest(
+        event_id=event_id,
+        organizer_id=current_user_id,
+        amount=amount,
+        description=description,
+        status="pending",
+    )
+    db.session.add(opr)
+    db.session.commit()
+    create_notification(
+        event.user_id,
+        "Payment request from organizer",
+        f"Organizer has requested {amount:.2f} USD for '{event.name}'.",
+        "payment",
+        {"organizer_request_id": opr.id, "event_id": event_id},
+    )
+    return jsonify({"message": "Request submitted", "organizer_request": opr.to_dict()}), 201
+
+
+@payments_bp.route("/organizer-requests", methods=["GET"])
+@jwt_required()
+def get_organizer_payment_requests():
+    user_id = int(get_jwt_identity())
+    # Event owner sees requests for their events; organizer sees their own requests
+    requests = OrganizerPaymentRequest.query.join(Event).filter(
+        or_(Event.user_id == user_id, OrganizerPaymentRequest.organizer_id == user_id)
+    ).all()
+    return jsonify({"organizer_requests": [r.to_dict() for r in requests]}), 200
+
+
+@payments_bp.route("/organizer-requests/<int:oid>/reject", methods=["PUT"])
+@jwt_required()
+def reject_organizer_request(oid):
+    current_user_id = int(get_jwt_identity())
+    opr = OrganizerPaymentRequest.query.get(oid)
+    if not opr:
+        return jsonify({"error": "Request not found"}), 404
+    if opr.event.user_id != current_user_id:
+        return jsonify({"error": "Only the event owner can reject this request"}), 403
+    if opr.status != "pending":
+        return jsonify({"error": "Request is not pending"}), 400
+    opr.status = "rejected"
+    db.session.commit()
+    create_notification(
+        opr.organizer_id,
+        "Payment request declined",
+        f"Your payment request for '{opr.event.name}' was declined by the client.",
+        "error",
+        {"organizer_request_id": opr.id},
+    )
+    return jsonify({"message": "Rejected"}), 200
+
 
 @payments_bp.route("/notifications", methods=["GET"])
 @jwt_required()
