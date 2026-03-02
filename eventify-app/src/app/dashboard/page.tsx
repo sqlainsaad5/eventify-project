@@ -281,14 +281,9 @@ export default function DashboardPage() {
                 <p className="text-sm text-indigo-50/90 leading-relaxed italic">
                   {eventList.length > 0
                     ? `You have ${eventList.length} active projects. Using dynamic vendor assignments could reduce overhead by 12% across your schedule.`
-                    : "Plan your first event to receive personalized AI recommendations on budgeting and venue selection."
+                    : "Plan your first event to receive personalized recommendations on budgeting and venue selection."
                   }
                 </p>
-                <Link href="/dashboard/chatbot">
-                  <Button className="w-full bg-white/20 hover:bg-white/30 border-white/10 text-white backdrop-blur-md rounded-xl">
-                    Discuss with Assistant
-                  </Button>
-                </Link>
               </CardContent>
             </Card>
 

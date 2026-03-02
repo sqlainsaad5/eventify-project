@@ -13,7 +13,6 @@ import {
   BarChart3,
   Calculator,
   Bell,
-  Bot,
   Menu,
   X,
   Sparkles,
@@ -45,7 +44,6 @@ const navItems = [
   { href: "/dashboard/budget", label: "Budget Planner", icon: Calculator },
   { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/dashboard/chatbot", label: "AI Assistant", icon: Bot },
 ]
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {

@@ -144,14 +144,9 @@ export default function BudgetPage() {
               <p className="text-sm leading-relaxed text-purple-50 italic">
                 {events.length > 0
                   ? "Based on your spending patterns, switching to package deals for photography could save you up to 12% on your next event."
-                  : "Start planning an event to get AI suggestions on budget optimization."
+                  : "Start planning an event to get suggestions on budget optimization."
                 }
               </p>
-              <Link href="/dashboard/chatbot">
-                <Button variant="link" className="text-white p-0 h-auto mt-4 text-xs font-bold uppercase tracking-widest justify-start hover:opacity-80">
-                  Discuss Recommendations <ArrowRight className="h-3 w-3 ml-1" />
-                </Button>
-              </Link>
             </CardContent>
           </Card>
         </div>

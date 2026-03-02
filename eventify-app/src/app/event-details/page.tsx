@@ -232,7 +232,7 @@ export default function EventDetailsPage() {
 
                 <div className="relative z-10">
                     <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-white/15 border border-white/20 text-xs font-black uppercase tracking-widest mb-6">
-                        <Sparkles className="h-4 w-4 animate-pulse" /> Let me know about your Events
+                        <Sparkles className="h-4 w-4 animate-pulse" /> Create Event
                     </div>
                     <h1 className="text-4xl md:text-6xl font-black tracking-tighter mb-4">
                         Your Vision, Our Expertise.

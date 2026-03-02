@@ -3,8 +3,54 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models import ChatMessage, User, Event, db
 from datetime import datetime
 from sqlalchemy import or_, and_
+import os
+from openai import OpenAI
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
+
+# Prefer Groq (free tier) if available; fallback to OpenAI
+_groq_key = os.getenv("GROQ_API_KEY")
+_openai_key = os.getenv("OPENAI_API_KEY")
+if _groq_key:
+    _chat_client = OpenAI(api_key=_groq_key, base_url="https://api.groq.com/openai/v1")
+    _chat_model = "llama-3.1-8b-instant"
+elif _openai_key:
+    _chat_client = OpenAI(api_key=_openai_key)
+    _chat_model = "gpt-3.5-turbo"
+else:
+    _chat_client = None
+    _chat_model = None
+
+
+@chat_bp.route("/ask", methods=["POST"])
+@jwt_required()
+def ask():
+    """Single-turn AI assistant reply for event planning. Requires JWT."""
+    try:
+        data = request.get_json() or {}
+        message = (data.get("message") or "").strip()
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+
+        if not _chat_client or not _chat_model:
+            return jsonify({
+                "reply": "AI is not configured. Set GROQ_API_KEY or OPENAI_API_KEY on the server to enable the assistant."
+            }), 200
+
+        response = _chat_client.chat.completions.create(
+            model=_chat_model,
+            messages=[
+                {"role": "system", "content": "You are a friendly event planning assistant for Eventify. Help users with ideas for events, venues, budgets, and planning. Keep replies concise and helpful."},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=300,
+        )
+        reply = (response.choices[0].message.content or "").strip()
+        return jsonify({"reply": reply or "I didn't get a response. Try rephrasing."}), 200
+    except Exception as e:
+        print(f"Chat ask error: {e}")
+        return jsonify({"reply": "Something went wrong. Please try again later."}), 200
+
 
 # ✅ Send message
 @chat_bp.route("/send", methods=["POST"])

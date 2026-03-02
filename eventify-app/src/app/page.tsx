@@ -22,14 +22,22 @@ import {
   LogOut,
   User,
   CalendarDays,
-  MessageSquare
+  MessageSquare,
+  Bot,
 } from "lucide-react"
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { AIAssistantPanel } from "@/components/ai-assistant-panel"
 
 export default function HomePage() {
   const router = useRouter()
   const [user, setUser] = useState<{ name: string; email: string } | null>(null)
   const [role, setRole] = useState<string | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [showAssistant, setShowAssistant] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Read auth state once on mount
@@ -68,6 +76,14 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+      <Sheet open={showAssistant} onOpenChange={setShowAssistant}>
+        <SheetContent side="right" className="w-full sm:max-w-md flex flex-col p-0">
+          <SheetTitle className="sr-only">AI Assistant</SheetTitle>
+          <div className="flex-1 min-h-0 flex flex-col">
+            <AIAssistantPanel />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* 🔹 HEADER */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
@@ -269,11 +285,24 @@ export default function HomePage() {
                   </Link>
                 </>
               ) : (
-                <Link href={role === "user" ? "/event-details" : "/dashboard"} className="w-full sm:w-auto">
-                  <Button size="lg" className="w-full h-16 px-12 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xl font-black shadow-2xl shadow-slate-200 transition-all hover:scale-105 active:scale-95 group">
-                    {role === "user" ? "Let me know about your Events" : "Go to Dashboard"} <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
-                  </Button>
-                </Link>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-5 w-full sm:w-auto">
+                  <Link href={role === "user" ? "/event-details" : "/dashboard"} className="w-full sm:w-auto">
+                    <Button size="lg" className="w-full h-16 px-12 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xl font-black shadow-2xl shadow-slate-200 transition-all hover:scale-105 active:scale-95 group">
+                      {role === "user" ? "Create Event" : "Go to Dashboard"} <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
+                    </Button>
+                  </Link>
+                  {role === "user" && (
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="w-full h-16 px-10 border-2 border-slate-100 bg-white text-slate-900 rounded-2xl text-lg font-bold hover:bg-slate-50 hover:border-slate-200 transition-all flex items-center justify-center gap-2"
+                      onClick={() => setShowAssistant(true)}
+                    >
+                      <Bot className="h-5 w-5" />
+                      AI Assistance
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -290,7 +319,7 @@ export default function HomePage() {
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       <Sparkles className="h-5 w-5 animate-pulse" />
-                      Give Me Your Event Details
+                      Create your Event
                       <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
                     </span>
                     {/* Shimmer overlay */}
