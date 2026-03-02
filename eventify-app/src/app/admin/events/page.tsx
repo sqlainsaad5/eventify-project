@@ -1,174 +1,348 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { AdminLayout } from "@/components/admin-layout"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Search, CheckCircle, XCircle, Eye } from "lucide-react"
+import { useCallback, useEffect, useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { useDebounce } from "@/hooks/use-debounce";
+import { useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { Search, CheckCircle, XCircle } from "lucide-react";
 
-interface Event {
-  id: number
-  title: string
-  organizer: string
-  vendor: string
-  date: string
-  budget: string
-  status: "Pending" | "Approved" | "Cancelled"
+interface AdminEvent {
+  id: number;
+  name: string;
+  date: string;
+  venue: string;
+  budget: number;
+  vendor_category: string;
+  organizer_name?: string | null;
+  organizer_id?: number | null;
+  organizer_status?: string | null;
+  assigned_vendors?: string[];
+}
+
+const API_BASE = "http://localhost:5000";
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("token")?.replace(/['"]+/g, "").trim() ?? null;
 }
 
 export default function AdminEventsPage() {
-  const [search, setSearch] = useState("")
-  const [events, setEvents] = useState<Event[]>([
-    {
-      id: 1,
-      title: "Tech Innovators Conference",
-      organizer: "Saad Amjad",
-      vendor: "Bin Maqsood Pvt Ltd",
-      date: "2025-11-20",
-      budget: "$5000",
-      status: "Approved",
-    },
-    {
-      id: 2,
-      title: "Corporate Gala Night",
-      organizer: "Amna Shah",
-      vendor: "Elite Decor",
-      date: "2025-12-05",
-      budget: "$8500",
-      status: "Pending",
-    },
-    {
-      id: 3,
-      title: "Wedding Reception",
-      organizer: "Usman Khalid",
-      vendor: "Star Events",
-      date: "2025-12-10",
-      budget: "$10000",
-      status: "Cancelled",
-    },
-  ])
+  const searchParams = useSearchParams();
+  const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebounce(searchInput, 350);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [organizerId, setOrganizerId] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
 
-  const filteredEvents = events.filter(
-    (e) =>
-      e.title.toLowerCase().includes(search.toLowerCase()) ||
-      e.organizer.toLowerCase().includes(search.toLowerCase()) ||
-      e.vendor.toLowerCase().includes(search.toLowerCase())
-  )
+  useEffect(() => {
+    const id = searchParams.get("organizer_id");
+    const num = id ? parseInt(id, 10) : NaN;
+    setOrganizerId(Number.isNaN(num) ? null : num);
+    setPage(1);
+  }, [searchParams]);
 
-  const handleStatusChange = (id: number, status: Event["status"]) => {
-    setEvents((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, status } : e))
-    )
-  }
+  const fetchEvents = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("per_page", String(perPage));
+      if (debouncedSearch) params.set("q", debouncedSearch);
+      if (statusFilter !== "all") params.set("organizer_status", statusFilter);
+      if (organizerId != null && !isNaN(organizerId))
+        params.set("organizer_id", String(organizerId));
+      const res = await fetch(`${API_BASE}/api/admin/events?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err?.error || "Failed to load events");
+        return;
+      }
+      const data = await res.json();
+      setEvents(data.events ?? []);
+      setTotal(data.total ?? 0);
+    } catch {
+      toast.error("Failed to load events");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, perPage, debouncedSearch, statusFilter, organizerId]);
+
+  useEffect(() => {
+    const initialStatus = searchParams.get("organizer_status");
+    if (initialStatus) setStatusFilter(initialStatus);
+  }, [searchParams]);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  const setOrganizerStatus = async (eventId: number, organizer_status: "accepted" | "rejected") => {
+    const token = getToken();
+    if (!token) return;
+    setUpdatingId(eventId);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/events/${eventId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ organizer_status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err?.error || "Failed to update event");
+        return;
+      }
+      toast.success(organizer_status === "accepted" ? "Event approved" : "Event rejected");
+      fetchEvents();
+    } catch {
+      toast.error("Failed to update event");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   return (
-    <AdminLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">Events Management</h1>
-          <p className="text-muted-foreground">
-            Review, approve, or cancel organizer-submitted events
-          </p>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative w-full md:w-1/3">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder="Search by event, organizer, or vendor..."
-            className="pl-8"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        {/* Events Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>All Events</CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="min-w-full border border-gray-200 text-sm">
-              <thead className="bg-gray-50 text-gray-700">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium">Event Title</th>
-                  <th className="px-4 py-2 text-left font-medium">Organizer</th>
-                  <th className="px-4 py-2 text-left font-medium">Vendor</th>
-                  <th className="px-4 py-2 text-left font-medium">Date</th>
-                  <th className="px-4 py-2 text-left font-medium">Budget</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                  <th className="px-4 py-2 text-center font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEvents.length > 0 ? (
-                  filteredEvents.map((event) => (
-                    <tr key={event.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-2">{event.title}</td>
-                      <td className="px-4 py-2 text-gray-600">{event.organizer}</td>
-                      <td className="px-4 py-2 text-gray-600">{event.vendor}</td>
-                      <td className="px-4 py-2">{event.date}</td>
-                      <td className="px-4 py-2">{event.budget}</td>
-                      <td className="px-4 py-2">
-                        <Badge
-                          className={
-                            event.status === "Approved"
-                              ? "bg-green-100 text-green-700"
-                              : event.status === "Pending"
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-red-100 text-red-700"
-                          }
-                        >
-                          {event.status}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2 text-center space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-blue-600 border-blue-600 hover:bg-blue-50"
-                          onClick={() => alert("Event details coming soon")}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {event.status !== "Approved" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStatusChange(event.id, "Approved")}
-                            className="text-green-600 border-green-600 hover:bg-green-50"
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {event.status !== "Cancelled" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStatusChange(event.id, "Cancelled")}
-                            className="text-red-600 border-red-600 hover:bg-red-50"
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="text-center py-6 text-gray-500">
-                      No events found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          Events
+        </h1>
+        <CardDescription>
+          View and approve or reject events (organizer status).
+        </CardDescription>
       </div>
-    </AdminLayout>
-  )
+
+      <Card className="rounded-2xl border-border">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search by name or venue..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Organizer status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="accepted">Accepted</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(perPage)}
+              onValueChange={(v) => {
+                setPerPage(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="20">20</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Venue</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Budget</TableHead>
+                    <TableHead>Organizer</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {events.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={7}
+                        className="h-24 text-center text-muted-foreground"
+                      >
+                        No events found.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    events.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell className="font-medium">{e.name}</TableCell>
+                        <TableCell className="max-w-[180px] truncate">
+                          {e.venue}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {e.date
+                            ? new Date(e.date).toLocaleDateString()
+                            : "—"}
+                        </TableCell>
+                        <TableCell>${Number(e.budget).toFixed(2)}</TableCell>
+                        <TableCell>{e.organizer_name || "—"}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              e.organizer_status === "accepted"
+                                ? "default"
+                                : e.organizer_status === "rejected"
+                                  ? "destructive"
+                                  : "secondary"
+                            }
+                          >
+                            {e.organizer_status || "pending"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {e.organizer_status === "pending" && (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-green-600"
+                                disabled={updatingId === e.id}
+                                onClick={() =>
+                                  setOrganizerStatus(e.id, "accepted")
+                                }
+                              >
+                                <CheckCircle className="mr-1 size-4" />
+                                Approve
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive"
+                                disabled={updatingId === e.id}
+                                onClick={() =>
+                                  setOrganizerStatus(e.id, "rejected")
+                                }
+                              >
+                                <XCircle className="mr-1 size-4" />
+                                Reject
+                              </Button>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+              {totalPages > 1 && (
+                <div className="mt-4 flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Page {page} of {totalPages} ({total} total)
+                  </p>
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (page > 1) setPage(page - 1);
+                          }}
+                          aria-disabled={page <= 1}
+                          className={
+                            page <= 1 ? "pointer-events-none opacity-50" : ""
+                          }
+                        />
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationLink href="#" isActive>
+                          {page}
+                        </PaginationLink>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (page < totalPages) setPage(page + 1);
+                          }}
+                          aria-disabled={page >= totalPages}
+                          className={
+                            page >= totalPages
+                              ? "pointer-events-none opacity-50"
+                              : ""
+                          }
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }

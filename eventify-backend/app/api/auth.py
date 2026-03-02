@@ -325,6 +325,9 @@ def login():
             db.session.add(user)
             db.session.commit()
 
+        if not getattr(user, "is_active", True):
+            return jsonify({"error": "Account is disabled. Contact support."}), 403
+
         token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
 
         return jsonify({
@@ -342,6 +345,9 @@ def login():
 
     if not user or not user.check_password(password):
         return jsonify({"error": "Invalid email or password"}), 401
+
+    if not getattr(user, "is_active", True):
+        return jsonify({"error": "Account is disabled. Contact support."}), 403
 
     if not user.is_verified:
         return jsonify({"error": "Please verify your email before logging in."}), 403

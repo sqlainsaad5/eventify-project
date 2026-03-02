@@ -6,7 +6,7 @@ import { Suspense } from "react"
 import "@/styles/globals.css"
 import "leaflet/dist/leaflet.css"
 import { Toaster } from "@/components/ui/sonner"
-
+import { ThemeProvider } from "@/components/theme-provider"
 
 // --- Optional but recommended for stability ---
 export const dynamic = "force-static"
@@ -28,8 +28,10 @@ export default function RootLayout({
         suppressHydrationWarning={true}
         className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}
       >
-        <Suspense fallback={null}>{children}</Suspense>
-        <Toaster position="top-center" />
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <Suspense fallback={null}>{children}</Suspense>
+          <Toaster position="top-center" />
+        </ThemeProvider>
       </body>
     </html>
   )

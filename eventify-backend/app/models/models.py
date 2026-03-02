@@ -32,6 +32,7 @@ class User(db.Model):
     category = db.Column(db.String(100))
     profile_image = db.Column(db.Text)
     is_verified = db.Column(db.Boolean, default=False)  # ✅ NEW
+    is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
     assigned_events = db.relationship(
@@ -81,6 +82,8 @@ class User(db.Model):
             "category": self.category,
             "profile_image": self.profile_image,
             "is_verified": self.is_verified,  # ✅ include in API responses
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
             "assigned_events": [event.to_dict() for event in self.assigned_events] if self.assigned_events else [],
         }
 

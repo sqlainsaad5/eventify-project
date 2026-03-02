@@ -1,6 +1,5 @@
 "use client"
 
-import { AdminLayout } from "@/components/admin-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   BarChart,
@@ -46,7 +45,7 @@ const COLORS = ["#6366f1", "#8b5cf6", "#a855f7", "#c084fc"]
 
 export default function AdminReportsPage() {
   return (
-    <AdminLayout>
+    <>
       <div className="space-y-6">
         {/* Header */}
         <div>
@@ -194,6 +193,6 @@ export default function AdminReportsPage() {
           </Card>
         </div>
       </div>
-    </AdminLayout>
+    </>
   )
 }

@@ -1,6 +1,5 @@
 "use client"
 
-import { AdminLayout } from "@/components/admin-layout"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 
 const feedbackLogs = [
@@ -11,7 +10,7 @@ const feedbackLogs = [
 
 export default function FeedbackPage() {
   return (
-    <AdminLayout>
+    <>
       <Card className="bg-white">
         <CardHeader>
           <CardTitle>AI Chatbot Feedback</CardTitle>
@@ -37,6 +36,6 @@ export default function FeedbackPage() {
           </table>
         </CardContent>
       </Card>
-    </AdminLayout>
+    </>
   )
 }

@@ -1,13 +1,12 @@
 "use client"
 
-import { AdminLayout } from "@/components/admin-layout"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
 export default function AdminProfilePage() {
   return (
-    <AdminLayout>
+    <>
       <Card className="bg-white max-w-xl mx-auto">
         <CardHeader>
           <CardTitle>Admin Profile Settings</CardTitle>
@@ -30,6 +29,6 @@ export default function AdminProfilePage() {
           </Button>
         </CardContent>
       </Card>
-    </AdminLayout>
+    </>
   )
 }
