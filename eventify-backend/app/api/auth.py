@@ -16,6 +16,10 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = "http://localhost:5000/api/auth/google/callback"
 
+# Fixed admin credentials
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
 # -------------------------------
 # Google OAuth Routes
 # -------------------------------
@@ -129,6 +133,11 @@ def signup():
 
     if not all([name, email, password]):
         return jsonify({"error": "All fields are required"}), 400
+
+    # Restrict roles that can be created via signup
+    allowed_roles = {"user", "organizer", "vendor"}
+    if role not in allowed_roles:
+        return jsonify({"error": "Invalid role"}), 400
 
     email = email.strip().lower()
     if User.query.filter_by(email=email).first():
@@ -290,13 +299,46 @@ def get_current_user():
 @auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-    email = data.get("email")
-    password = data.get("password")
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
 
-    if not all([email, password]):
+    if not email or not password:
         return jsonify({"error": "Email and password are required"}), 400
 
-    user = User.query.filter_by(email=email.strip().lower()).first()
+    # Special handling for fixed admin credentials from environment
+    if ADMIN_EMAIL and ADMIN_PASSWORD and email == ADMIN_EMAIL.strip().lower():
+        if password != ADMIN_PASSWORD:
+            return jsonify({"error": "Invalid email or password"}), 401
+
+        # Ensure admin user exists in the database
+        admin_email_normalized = ADMIN_EMAIL.strip().lower()
+        user = User.query.filter_by(email=admin_email_normalized).first()
+
+        if not user:
+            user = User(
+                name="Admin",
+                email=admin_email_normalized,
+                role="admin",
+                is_verified=True,
+            )
+            user.set_password(ADMIN_PASSWORD)
+            db.session.add(user)
+            db.session.commit()
+
+        token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
+
+        return jsonify({
+            "message": "Login successful",
+            "user": user.to_dict(),
+            "token": token
+        }), 200
+
+    # Normal login flow for non-admin users
+    user = User.query.filter_by(email=email).first()
+
+    # Block any admin users that do not match the configured admin email
+    if user and user.role == "admin" and ADMIN_EMAIL and email != ADMIN_EMAIL.strip().lower():
+        return jsonify({"error": "Invalid email or password"}), 401
 
     if not user or not user.check_password(password):
         return jsonify({"error": "Invalid email or password"}), 401
