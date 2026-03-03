@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<any[]>([])
   const [paymentRequests, setPaymentRequests] = useState<any[]>([])
   const [organizerRequests, setOrganizerRequests] = useState<any[]>([])
+  const [vendors, setVendors] = useState<any[]>([])
   const [userName, setUserName] = useState(() => {
     if (typeof window !== "undefined") {
       try {
@@ -59,14 +60,22 @@ export default function DashboardPage() {
       const userRes = await fetch("http://localhost:5000/api/auth/me", {
         headers: { Authorization: `Bearer ${token}` }
       })
+      if (userRes.status === 401) {
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("role")
+        router.push("/login")
+        setLoading(false)
+        return
+      }
       if (userRes.ok) {
         const userData = await userRes.json()
         setUserName(userData.name)
         localStorage.setItem("user", JSON.stringify(userData))
       }
 
-      // 2. Fetch Events, Payments, and Organizer Requests
-      const [eventsRes, paymentsRes, organizerRequestsRes] = await Promise.all([
+      // 2. Fetch Events, Payments, Organizer Requests, and Vendors
+      const [eventsRes, paymentsRes, organizerRequestsRes, vendorsRes] = await Promise.all([
         fetch("http://localhost:5000/api/events", {
           headers: { Authorization: `Bearer ${token}` }
         }),
@@ -75,12 +84,16 @@ export default function DashboardPage() {
         }),
         fetch("http://localhost:5000/api/payments/organizer-requests", {
           headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch("http://localhost:5000/api/vendors", {
+          headers: { Authorization: `Bearer ${token}` }
         })
       ])
 
       const eventsData = await eventsRes.json()
       const paymentsData = await paymentsRes.json()
       const organizerRequestsData = organizerRequestsRes.ok ? await organizerRequestsRes.json() : {}
+      const vendorsData = vendorsRes.ok ? await vendorsRes.json() : []
 
       console.log("Dashboard Debug - Events Raw Data:", eventsData)
 
@@ -111,6 +124,12 @@ export default function DashboardPage() {
         setOrganizerRequests(organizerRequestsData.organizer_requests || [])
       }
 
+      if (vendorsRes.ok && Array.isArray(vendorsData)) {
+        setVendors(vendorsData)
+      } else {
+        setVendors([])
+      }
+
     } catch (error) {
       console.error("Dashboard fetch error:", error)
       toast.error("Failed to sync dashboard data")
@@ -125,7 +144,7 @@ export default function DashboardPage() {
 
   const totalBudget = eventList.reduce((sum, e) => sum + (Number(e?.budget) || 0), 0)
   const pendingRequests = paymentRequestList.filter(r => r?.status === "pending").length
-  const totalVendors = new Set(eventList.flatMap(e => e?.assigned_vendors || [])).size
+  const totalVendors = Array.isArray(vendors) ? vendors.length : 0
 
   const sortedUpcoming = [...eventList]
     .filter(e => e?.date && new Date(e.date) >= new Date())
@@ -204,7 +223,7 @@ export default function DashboardPage() {
             trend="Organized capital"
             icon={<DollarSign className="h-5 w-5 text-amber-600" />}
             bgColor="bg-amber-50"
-            href="/dashboard/budget"
+            href="/my-events/budget"
           />
         </div>
 
@@ -223,16 +242,30 @@ export default function DashboardPage() {
               {sortedUpcoming.length > 0 ? (
                 sortedUpcoming.map((event) => {
                   const userId = getUserId()
-                  const organizerPaid = userId != null && event?.organizer_id === userId && organizerRequests.some((r: any) => r.event_id === event.id && r.status === "paid")
+                  const organizerAdvancePaid = !!event?.organizer_advance_paid
+                  const organizerFinalPaid = !!event?.organizer_final_paid
+                  const organizerFullyPaid =
+                    userId != null &&
+                    event?.organizer_id === userId &&
+                    organizerAdvancePaid &&
+                    organizerFinalPaid
+
                   return (
-                  <Card key={event.id} className={`group transition-all duration-200 overflow-hidden rounded-2xl ${organizerPaid ? "opacity-85 border-slate-200 border hover:shadow-sm" : "border-slate-200/60 border hover:border-purple-200 hover:shadow-md"}`}>
+                  <Card
+                    key={event.id}
+                    className={`group transition-all duration-200 overflow-hidden rounded-2xl ${
+                      organizerFullyPaid
+                        ? "opacity-85 border-slate-200 border hover:shadow-sm"
+                        : "border-slate-200/60 border hover:border-purple-200 hover:shadow-md"
+                    }`}
+                  >
                     <div className="flex items-center p-5">
                       <div className={`w-1.5 h-10 rounded-full bg-purple-600 mr-5`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="font-bold text-slate-900 truncate">{event.name}</h3>
-                          {organizerPaid && (
-                            <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Paid</Badge>
+                          {organizerFullyPaid && (
+                            <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Fully Paid</Badge>
                           )}
                           <Badge variant="secondary" className="bg-purple-50 text-purple-600 border-none text-[10px] uppercase font-bold px-1.5 py-0">
                             {event.progress === 100 ? "Completed" : event.progress > 0 ? "In Progress" : "Planning"}
@@ -303,7 +336,7 @@ export default function DashboardPage() {
                     Plan New Project
                   </Button>
                 </Link>
-                <Link href="/dashboard/budget">
+                <Link href="/my-events/budget">
                   <Button variant="outline" className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl" size="sm">
                     View Budget Report
                   </Button>

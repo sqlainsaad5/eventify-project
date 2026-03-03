@@ -96,11 +96,22 @@ class Event(db.Model):
     date = db.Column(db.String(20), nullable=False)
     venue = db.Column(db.String(200), nullable=False)
     budget = db.Column(db.Float, nullable=False)
+    total_spent = db.Column(db.Float, default=0.0)
+    remaining_budget = db.Column(db.Float, nullable=True)
     vendor_category = db.Column(db.String(50), nullable=False)
     image_url = db.Column(db.String(250))
     progress = db.Column(db.Integer, default=0)
 
-    
+    # High-level lifecycle status for the event
+    # created, awaiting_organizer_confirmation, pending_advance_payment,
+    # advance_payment_completed, vendor_assigned, completed
+    status = db.Column(db.String(50), default="created")
+
+    # Organizer payment workflow flags
+    # Track 25% advance, 75% request, and 75% completion for organizer fees
+    organizer_advance_paid = db.Column(db.Boolean, default=False)
+    organizer_final_requested = db.Column(db.Boolean, default=False)
+    organizer_final_paid = db.Column(db.Boolean, default=False)
 
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
@@ -117,9 +128,16 @@ class Event(db.Model):
             "date": self.date,
             "venue": self.venue,
             "budget": self.budget,
+            "total_budget": self.budget,
+            "total_spent": self.total_spent or 0,
+            "remaining_budget": self.remaining_budget if self.remaining_budget is not None else (self.budget - (self.total_spent or 0)),
             "vendor_category": self.vendor_category,
             "image_url": self.image_url,
             "progress": self.progress,
+            "status": self.status,
+            "organizer_advance_paid": bool(self.organizer_advance_paid),
+            "organizer_final_requested": bool(self.organizer_final_requested),
+            "organizer_final_paid": bool(self.organizer_final_paid),
             "user_id": self.user_id,
             "organizer_id": self.organizer_id,
             "organizer_name": self.organizer.name if self.organizer else None,
@@ -156,11 +174,42 @@ class PaymentRequest(db.Model):
             "event_name": self.event.name if self.event else "Unknown Event"
         }
 
+
+class EventVendorAgreement(db.Model):
+    """Agreed price and payment status per event-vendor (Budget Planner FR-04)."""
+    __tablename__ = "event_vendor_agreement"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    agreed_price = db.Column(db.Float, nullable=False)
+    service_type = db.Column(db.String(100), default="General")
+    payment_status = db.Column(db.String(20), default="pending")  # pending, advance_paid, completed
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    event = db.relationship("Event", backref="vendor_agreements")
+    vendor = db.relationship("User", backref="event_agreements")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "vendor_id": self.vendor_id,
+            "vendor_name": self.vendor.name if self.vendor else "Unknown Vendor",
+            "agreed_price": self.agreed_price,
+            "service_type": self.service_type,
+            "payment_status": self.payment_status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Payment(db.Model):
     __tablename__ = "payment"
     
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.Integer, db.ForeignKey('event.id'), nullable=False)
+    vendor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    payment_type = db.Column(db.String(20), nullable=True)  # advance, final, or null for non-vendor
     amount = db.Column(db.Float, nullable=False)
     currency = db.Column(db.String(10), default='USD')
     status = db.Column(db.String(30), default='pending')  # Increased length
@@ -172,13 +221,18 @@ class Payment(db.Model):
     # ✅ UNCOMMENT THESE - Now columns exist in database
     bank_reference = db.Column(db.String(100))
     transfer_date = db.Column(db.DateTime)
-    
+    notes = db.Column(db.Text, nullable=True)
+
     event = db.relationship('Event', backref='payments')
+    vendor = db.relationship('User', foreign_keys=[vendor_id])
     
     def to_dict(self):
         return {
             "id": self.id,
             "event_id": self.event_id,
+            "vendor_id": self.vendor_id,
+            "vendor_name": self.vendor.name if self.vendor else None,
+            "payment_type": self.payment_type,
             "amount": self.amount,
             "currency": self.currency,
             "status": self.status,
@@ -187,8 +241,9 @@ class Payment(db.Model):
             "payment_date": self.payment_date.isoformat() if self.payment_date else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "event_name": self.event.name if self.event else "Unknown Event",
-            "bank_reference": self.bank_reference,  # ✅ UNCOMMENT
-            "transfer_date": self.transfer_date.isoformat() if self.transfer_date else None  # ✅ UNCOMMENT
+            "bank_reference": self.bank_reference,
+            "transfer_date": self.transfer_date.isoformat() if self.transfer_date else None,
+            "notes": self.notes,
         }
 
 # Add this to your existing models.py

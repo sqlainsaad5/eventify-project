@@ -1,9 +1,10 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
-from app.models import Event, User
+from app.models import Event, User, EventVendorAgreement, Payment
 import os
 import uuid
+from collections import defaultdict
 from openai import OpenAI
 
 events_bp = Blueprint("events", __name__, url_prefix="/api/events")
@@ -63,18 +64,44 @@ def list_events():
     user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "User not found"}), 404
-        
+
     # Personal events (created by user)
     created_events = Event.query.filter_by(user_id=user_id).all()
-    
+
     # Assigned events (if user is organizer)
     assigned_events = []
     if user.role == "organizer":
         assigned_events = Event.query.filter_by(organizer_id=user_id).all()
-        
+
+    # Compute total_spent from Payment table (same rules as get_budget_summary)
+    event_ids = list({e.id for e in created_events} | {e.id for e in assigned_events})
+    totals = defaultdict(float)
+    if event_ids:
+        payments = (
+            Payment.query.filter(
+                Payment.event_id.in_(event_ids),
+                Payment.status == "completed",
+            )
+            .filter(
+                Payment.payment_type.in_(
+                    ["advance", "final", "organizer_advance", "organizer_final"]
+                )
+            )
+            .all()
+        )
+        for p in payments:
+            totals[p.event_id] += float(p.amount or 0)
+
+    def event_to_dict_with_spent(e):
+        d = e.to_dict()
+        spent = totals.get(e.id, 0.0)
+        d["total_spent"] = spent
+        d["remaining_budget"] = float(e.budget or 0) - spent
+        return d
+
     return jsonify({
-        "created": [e.to_dict() for e in created_events],
-        "assigned": [e.to_dict() for e in assigned_events]
+        "created": [event_to_dict_with_spent(e) for e in created_events],
+        "assigned": [event_to_dict_with_spent(e) for e in assigned_events],
     }), 200
 
 
@@ -133,6 +160,17 @@ def create_event():
             except (ValueError, TypeError):
                 organizer_id = None
 
+        # Default: if the creator is an organizer and no explicit organizer_id
+        # was provided (or it failed validation), assign the event to them.
+        if not organizer_id and user.role == "organizer":
+            organizer_id = user_id
+
+        # Determine initial lifecycle status
+        if organizer_id:
+            status = "awaiting_organizer_confirmation"
+        else:
+            status = "created"
+
         event = Event(
             name=data["name"].strip(),
             date=data["date"],
@@ -142,7 +180,8 @@ def create_event():
             image_url=image_url,
             user_id=user_id,
             organizer_id=organizer_id,
-            progress=0
+            progress=0,
+            status=status,
         )
 
         db.session.add(event)
@@ -202,6 +241,9 @@ def update_event(event_id):
                     setattr(event, field, float(data[field]))
                 else:
                     setattr(event, field, data[field])
+        if "budget" in data:
+            total_spent = float(event.total_spent or 0)
+            event.remaining_budget = float(data["budget"]) - total_spent
 
         db.session.commit()
         
@@ -358,6 +400,13 @@ def respond_assignment(event_id):
             return jsonify({"error": "Assignment not found or unauthorized"}), 404
 
         event.organizer_status = status
+        # Update high-level lifecycle status
+        if status == "accepted":
+            event.status = "pending_advance_payment"
+        elif status == "rejected":
+            # Return event to a generic created state for the owner
+            event.status = "created"
+
         db.session.commit()
 
         # Notify the Event Creator
@@ -384,3 +433,478 @@ def respond_assignment(event_id):
         print(f"❌ Error in respond_assignment: {str(e)}")
         db.session.rollback()
         return jsonify({"error": "Internal server error"}), 500
+
+
+@events_bp.route("/<int:event_id>/create-advance-request", methods=["POST"])
+@jwt_required()
+def create_advance_request(event_id):
+    """
+    Create a 25% advance payment request from the organizer to the event owner.
+
+    Only the assigned organizer can create this, and only when the event is in
+    'pending_advance_payment' status. If a paid request already exists for this
+    event and organizer, no new request is allowed.
+    """
+    try:
+        from app.models import OrganizerPaymentRequest  # local import to avoid cycles
+        from app.api.payments import create_notification
+
+        user_id = get_jwt_identity()
+        organizer = User.query.get(user_id)
+        if not organizer or organizer.role != "organizer":
+            return jsonify({"error": "Only organizers can create advance requests"}), 403
+
+        event = Event.query.filter_by(id=event_id, organizer_id=user_id).first()
+        if not event:
+            return jsonify({"error": "Event not found or unauthorized"}), 404
+
+        if event.status != "pending_advance_payment":
+            return jsonify({"error": "Advance request can only be created when the event is pending advance payment"}), 400
+
+        if not event.budget or event.budget <= 0:
+            return jsonify({"error": "Event budget must be set before creating an advance request"}), 400
+
+        # Ensure we don't create multiple paid requests for the same event/organizer
+        existing_paid = OrganizerPaymentRequest.query.filter_by(
+            event_id=event.id,
+            organizer_id=user_id,
+            status="paid",
+        ).first()
+        if existing_paid:
+            return jsonify({"error": "An advance payment for this event has already been paid"}), 400
+
+        # If a pending request already exists, just return it instead of duplicating
+        existing_pending = OrganizerPaymentRequest.query.filter_by(
+            event_id=event.id,
+            organizer_id=user_id,
+            status="pending",
+        ).first()
+        if existing_pending:
+            return jsonify(
+                {
+                    "message": "An advance request is already pending for this event",
+                    "organizer_request": existing_pending.to_dict(),
+                }
+            ), 200
+
+        amount = float(event.budget) * 0.25
+        opr = OrganizerPaymentRequest(
+            event_id=event.id,
+            organizer_id=user_id,
+            amount=amount,
+            description="25% advance payment for event organizer services",
+            status="pending",
+        )
+        db.session.add(opr)
+        db.session.commit()
+
+        # Notify the event owner (client)
+        try:
+            create_notification(
+                event.user_id,
+                "Advance payment requested",
+                f"Your organizer has requested a 25% advance payment for '{event.name}'.",
+                "payment",
+                {"organizer_request_id": opr.id, "event_id": event.id},
+            )
+        except Exception as e:
+            print(f"Advance request notification failed: {e}")
+
+        return jsonify(
+            {
+                "message": "25% advance request created",
+                "organizer_request": opr.to_dict(),
+            }
+        ), 201
+
+    except Exception as e:
+        print(f"❌ Error in create_advance_request: {str(e)}")
+        db.session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@events_bp.route("/<int:event_id>/create-final-request", methods=["POST"])
+@jwt_required()
+def create_final_request(event_id):
+    """
+    Create a 75% final payment request from the organizer to the event owner.
+
+    Only the assigned organizer can create this, and only after the 25% advance
+    has been paid and the event is marked as completed. If a pending final
+    request already exists, or a final payment has already been paid, no new
+    request is allowed.
+    """
+    try:
+        from app.models import OrganizerPaymentRequest  # local import to avoid cycles
+        from app.api.payments import create_notification
+
+        user_id = get_jwt_identity()
+        organizer = User.query.get(user_id)
+        if not organizer or organizer.role != "organizer":
+            return jsonify({"error": "Only organizers can create final payment requests"}), 403
+
+        event = Event.query.filter_by(id=event_id, organizer_id=user_id).first()
+        if not event:
+            return jsonify({"error": "Event not found or unauthorized"}), 404
+
+        # Require 25% advance to be paid first
+        if not getattr(event, "organizer_advance_paid", False):
+            return jsonify({"error": "Advance (25%) payment must be paid before requesting final payment"}), 400
+
+        # Require the event to be completed before requesting the remaining 75%
+        if event.status != "completed":
+            return jsonify({"error": "Event must be marked as completed before requesting the final 75% payment"}), 400
+
+        if not event.budget or event.budget <= 0:
+            return jsonify({"error": "Event budget must be set before creating a final payment request"}), 400
+
+        final_amount = round(float(event.budget) * 0.75, 2)
+
+        # Block duplicate paid final requests
+        existing_final_paid = (
+            OrganizerPaymentRequest.query.filter_by(
+                event_id=event.id,
+                organizer_id=user_id,
+                status="paid",
+            )
+            .filter(OrganizerPaymentRequest.amount == final_amount)
+            .first()
+        )
+        if existing_final_paid:
+            return jsonify({"error": "Final payment for this event has already been paid"}), 400
+
+        # If a pending final request already exists, just return it instead of duplicating
+        existing_final_pending = (
+            OrganizerPaymentRequest.query.filter_by(
+                event_id=event.id,
+                organizer_id=user_id,
+                status="pending",
+            )
+            .filter(OrganizerPaymentRequest.amount == final_amount)
+            .first()
+        )
+        if existing_final_pending:
+            return jsonify(
+                {
+                    "message": "A final payment request is already pending for this event",
+                    "organizer_request": existing_final_pending.to_dict(),
+                }
+            ), 200
+
+        opr = OrganizerPaymentRequest(
+            event_id=event.id,
+            organizer_id=user_id,
+            amount=final_amount,
+            description="75% final payment for event organizer services",
+            status="pending",
+        )
+        db.session.add(opr)
+
+        # Mark that the final payment has been requested
+        event.organizer_final_requested = True
+
+        db.session.commit()
+
+        # Notify the event owner (client)
+        try:
+            create_notification(
+                event.user_id,
+                "Final payment requested",
+                f"Your organizer has requested the remaining 75% payment for '{event.name}'.",
+                "payment",
+                {"organizer_request_id": opr.id, "event_id": event.id},
+            )
+        except Exception as e:
+            print(f"Final payment request notification failed: {e}")
+
+        return jsonify(
+            {
+                "message": "75% final payment request created",
+                "organizer_request": opr.to_dict(),
+            }
+        ), 201
+
+    except Exception as e:
+        print(f"❌ Error in create_final_request: {str(e)}")
+        db.session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@events_bp.route("/<int:event_id>/complete", methods=["POST"])
+@jwt_required()
+def complete_event(event_id):
+    """
+    Mark an event as completed.
+
+    Allowed for the event owner or the assigned organizer.
+    """
+    try:
+        user_id = get_jwt_identity()
+        event = Event.query.filter(
+            Event.id == event_id,
+            db.or_(Event.user_id == user_id, Event.organizer_id == user_id),
+        ).first()
+
+        if not event:
+            return jsonify({"error": "Event not found or unauthorized"}), 404
+
+        event.status = "completed"
+        # Optionally ensure progress reflects completion
+        if event.progress is None or event.progress < 100:
+            event.progress = 100
+
+        db.session.commit()
+
+        return jsonify({"message": "Event marked as completed", "event": event.to_dict()}), 200
+
+    except Exception as e:
+        print(f"❌ Error in complete_event: {str(e)}")
+        db.session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
+
+
+# --- BUDGET PLANNER (FR-04) ---
+
+def _get_event_for_budget(event_id, user_id):
+    """Get event if user is owner or organizer."""
+    return Event.query.filter(
+        Event.id == event_id,
+        db.or_(Event.user_id == user_id, Event.organizer_id == user_id)
+    ).first()
+
+
+@events_bp.route("/<int:event_id>/budget-summary", methods=["GET"])
+@jwt_required()
+def get_budget_summary(event_id):
+    """Budget overview: total_budget, total_spent, remaining, vendor agreements with advance/final status."""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    total_budget = float(event.budget or 0)
+
+    # Recompute total_spent and remaining_budget from completed payments
+    completed_payments = (
+        Payment.query.filter_by(
+            event_id=event_id,
+            status="completed",
+        )
+        .filter(
+            Payment.payment_type.in_(
+                ["advance", "final", "organizer_advance", "organizer_final"]
+            )
+        )
+        .all()
+    )
+
+    total_spent = float(sum(p.amount or 0 for p in completed_payments))
+    remaining_budget = total_budget - total_spent
+
+    agreements = EventVendorAgreement.query.filter_by(event_id=event_id).all()
+    vendor_agreements = []
+    for a in agreements:
+        advance_amt = round(a.agreed_price * 0.25, 2)
+        final_amt = round(a.agreed_price * 0.75, 2)
+        advance_paid = Payment.query.filter_by(
+            event_id=event_id, vendor_id=a.vendor_id, payment_type="advance", status="completed"
+        ).first()
+        final_paid = Payment.query.filter_by(
+            event_id=event_id, vendor_id=a.vendor_id, payment_type="final", status="completed"
+        ).first()
+        vendor_agreements.append({
+            "id": a.id,
+            "vendor_id": a.vendor_id,
+            "vendor_name": a.vendor.name if a.vendor else "Unknown",
+            "service_type": a.service_type or "General",
+            "agreed_price": a.agreed_price,
+            "advance_amount": advance_amt,
+            "final_amount": final_amt,
+            "advance_status": "paid" if advance_paid else "pending",
+            "final_status": "paid" if final_paid else "pending",
+            "payment_status": a.payment_status,
+        })
+
+    agreement_vendor_ids = {a.vendor_id for a in agreements}
+    assigned_without_agreement = [
+        {"id": v.id, "name": v.name, "category": v.category or "Vendor"}
+        for v in event.assigned_vendors
+        if v.id not in agreement_vendor_ids
+    ]
+
+    return jsonify({
+        "event_id": event_id,
+        "event_name": event.name,
+        "total_budget": total_budget,
+        "total_spent": total_spent,
+        "remaining_budget": remaining_budget,
+        "vendor_agreements": vendor_agreements,
+        "assigned_vendors_without_agreement": assigned_without_agreement,
+    }), 200
+
+
+@events_bp.route("/<int:event_id>/budget", methods=["PATCH"])
+@jwt_required()
+def update_event_budget(event_id):
+    """Set/update event total budget; recalc remaining_budget."""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    data = request.get_json() or {}
+    budget_val = data.get("budget")
+    if budget_val is None:
+        return jsonify({"error": "budget required"}), 400
+    try:
+        budget_val = float(budget_val)
+    except (TypeError, ValueError):
+        return jsonify({"error": "budget must be a number"}), 400
+    if budget_val < 0:
+        return jsonify({"error": "budget must be non-negative"}), 400
+
+    event.budget = budget_val
+    total_spent = float(event.total_spent or 0)
+    event.remaining_budget = budget_val - total_spent
+    db.session.commit()
+
+    return jsonify({"message": "Budget updated", "event": event.to_dict()}), 200
+
+
+@events_bp.route("/<int:event_id>/vendor-agreements", methods=["GET"])
+@jwt_required()
+def get_vendor_agreements(event_id):
+    """List vendor agreements for event."""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    agreements = EventVendorAgreement.query.filter_by(event_id=event_id).all()
+    return jsonify({"vendor_agreements": [a.to_dict() for a in agreements]}), 200
+
+
+@events_bp.route("/<int:event_id>/vendor-agreements", methods=["PUT"])
+@jwt_required()
+def upsert_vendor_agreements(event_id):
+    """Upsert agreed_price, service_type for vendor(s). Body: { agreements: [{ vendor_id, agreed_price, service_type? }] }"""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    data = request.get_json() or {}
+    agreements_data = data.get("agreements", [])
+    if not agreements_data:
+        return jsonify({"error": "agreements array required"}), 400
+
+    results = []
+    for item in agreements_data:
+        vendor_id = item.get("vendor_id")
+        agreed_price = item.get("agreed_price")
+        service_type = item.get("service_type") or "General"
+        if vendor_id is None or agreed_price is None:
+            continue
+        try:
+            agreed_price = float(agreed_price)
+        except (TypeError, ValueError):
+            continue
+        if agreed_price <= 0:
+            continue
+        vendor = User.query.get(vendor_id)
+        if not vendor or vendor.role != "vendor":
+            continue
+        if event not in vendor.assigned_events:
+            continue
+
+        existing = EventVendorAgreement.query.filter_by(event_id=event_id, vendor_id=vendor_id).first()
+        if existing:
+            existing.agreed_price = agreed_price
+            existing.service_type = service_type
+            results.append(existing.to_dict())
+        else:
+            new_agreement = EventVendorAgreement(
+                event_id=event_id,
+                vendor_id=vendor_id,
+                agreed_price=agreed_price,
+                service_type=service_type,
+                payment_status="pending",
+            )
+            db.session.add(new_agreement)
+            db.session.flush()
+            results.append(new_agreement.to_dict())
+
+    db.session.commit()
+    return jsonify({"vendor_agreements": results}), 200
+
+
+@events_bp.route("/<int:event_id>/vendor-agreements/<int:agreement_id>", methods=["PATCH"])
+@jwt_required()
+def update_vendor_agreement(event_id, agreement_id):
+    """Update a single vendor agreement (agreed_price, service_type)."""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    agreement = EventVendorAgreement.query.filter_by(
+        id=agreement_id, event_id=event_id
+    ).first()
+    if not agreement:
+        return jsonify({"error": "Vendor agreement not found"}), 404
+
+    data = request.get_json() or {}
+    if "agreed_price" in data:
+        try:
+            val = float(data["agreed_price"])
+            if val <= 0:
+                return jsonify({"error": "agreed_price must be positive"}), 400
+            agreement.agreed_price = val
+        except (TypeError, ValueError):
+            return jsonify({"error": "agreed_price must be a number"}), 400
+    if "service_type" in data:
+        agreement.service_type = (data["service_type"] or "General").strip() or "General"
+
+    db.session.commit()
+    return jsonify({"vendor_agreement": agreement.to_dict()}), 200
+
+
+@events_bp.route("/<int:event_id>/vendor-agreements/<int:agreement_id>", methods=["DELETE"])
+@jwt_required()
+def delete_vendor_agreement(event_id, agreement_id):
+    """Delete a vendor agreement. Only allowed if no advance/final payments recorded for this vendor."""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    agreement = EventVendorAgreement.query.filter_by(
+        id=agreement_id, event_id=event_id
+    ).first()
+    if not agreement:
+        return jsonify({"error": "Vendor agreement not found"}), 404
+
+    has_payments = Payment.query.filter_by(
+        event_id=event_id, vendor_id=agreement.vendor_id, status="completed"
+    ).filter(Payment.payment_type.in_(["advance", "final"])).first()
+    if has_payments:
+        return jsonify({
+            "error": "Cannot remove agreement: payments have already been recorded for this vendor. Remove or adjust payments first."
+        }), 400
+
+    db.session.delete(agreement)
+    db.session.commit()
+    return jsonify({"message": "Vendor agreement removed"}), 200
+
+
+@events_bp.route("/<int:event_id>/payments", methods=["GET"])
+@jwt_required()
+def get_event_payments(event_id):
+    """Payment history for event (for Budget Planner)."""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    payments = Payment.query.filter_by(event_id=event_id).order_by(Payment.created_at.desc()).all()
+    return jsonify({"payments": [p.to_dict() for p in payments]}), 200

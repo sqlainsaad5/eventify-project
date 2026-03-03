@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import User, Event, db, PaymentRequest, Payment, OrganizerPaymentRequest, VendorEventVerification
+from app.models import User, Event, db, PaymentRequest, Payment, OrganizerPaymentRequest, VendorEventVerification, EventVendorAgreement
 from sqlalchemy import or_, and_
 from datetime import datetime
 import stripe
@@ -88,9 +88,42 @@ def handle_payment_success(payment_intent):
                 if organizer_request_id:
                     opr = OrganizerPaymentRequest.query.get(int(organizer_request_id))
                     if opr:
-                        opr.status = 'paid'
+                        opr.status = "paid"
                         opr.paid_at = datetime.now()
                         opr.payment_id = payment.id
+
+                        # Determine whether this organizer payment is the 25% advance
+                        # or the 75% final amount based on the agreed event budget.
+                        event = opr.event
+                        if event:
+                            total_budget = float(event.budget or 0)
+                            paid_amount = float(opr.amount or 0)
+                            advance_amount = round(total_budget * 0.25, 2) if total_budget > 0 else 0
+                            final_amount = round(total_budget * 0.75, 2) if total_budget > 0 else 0
+
+                            is_advance = total_budget > 0 and abs(paid_amount - advance_amount) < 0.01
+                            is_final = total_budget > 0 and abs(paid_amount - final_amount) < 0.01
+
+                            if is_advance:
+                                # Mark advance (25%) paid and keep existing lifecycle behaviour.
+                                event.organizer_advance_paid = True
+                                if event.status == "pending_advance_payment":
+                                    event.status = "advance_payment_completed"
+                                if payment.payment_type is None:
+                                    payment.payment_type = "organizer_advance"
+                            elif is_final:
+                                # Mark final (75%) paid. Event should already be completed;
+                                # we just toggle the organizer flags and payment_type.
+                                event.organizer_final_paid = True
+                                if payment.payment_type is None:
+                                    payment.payment_type = "organizer_final"
+
+                                # When both 25% and 75% are paid, the event is fully paid.
+                                # The event may already be in 'completed' status via the
+                                # /complete endpoint, so we don't override it here.
+                                if getattr(event, "organizer_advance_paid", False) and not event.status:
+                                    event.status = "completed"
+
                         print(f"✅ Organizer request {organizer_request_id} marked as PAID")
                         create_notification(
                             opr.organizer_id,
@@ -168,7 +201,8 @@ def create_payment_intent():
             amount=float(amount),
             currency="USD",
             status="pending",
-            payment_method="card"
+            payment_method="card",
+            payment_type=None,
         )
         db.session.add(payment)
         db.session.commit()
@@ -272,7 +306,8 @@ def get_events_with_payment_status():
             **event.to_dict(),
             "deposit_amount": deposit_thresh,
             "vendor_payments_total": max(0, total_p - deposit_thresh),
-            "payment_status": status
+            "payment_status": status,
+            "total_spent": round(total_p, 2),
         })
     return jsonify(results), 200
 
@@ -377,6 +412,109 @@ def process_settlement(rid):
         "message": "Use /create-payment-intent with request_id to settle via Stripe",
         "request_id": rid
     }), 200
+
+
+# --- BUDGET PLANNER: Register vendor payment (FR04-01, FR04-02, FR04-03) ---
+
+@payments_bp.route("/register", methods=["POST"])
+@jwt_required()
+def register_vendor_payment():
+    """Register organizer payment (advance 25% or final 75%). Auto-deducts from event budget."""
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    event_id = data.get("event_id")
+    vendor_id = data.get("vendor_id")
+    payment_type = data.get("payment_type")  # advance | final
+    amount = data.get("amount")
+    payment_method = data.get("payment_method") or "bank_transfer"
+    notes = data.get("notes", "")
+
+    if not event_id or not vendor_id or not payment_type or amount is None:
+        return jsonify({"error": "event_id, vendor_id, payment_type, and amount required"}), 400
+    if payment_type not in ("advance", "final"):
+        return jsonify({"error": "payment_type must be 'advance' or 'final'"}), 400
+
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    if event.user_id != current_user_id and event.organizer_id != current_user_id:
+        return jsonify({"error": "Only event owner or organizer can register vendor payments"}), 403
+
+    agreement = EventVendorAgreement.query.filter_by(event_id=event_id, vendor_id=vendor_id).first()
+    if not agreement:
+        return jsonify({"error": "No vendor agreement found for this event-vendor. Set agreed price first."}), 404
+
+    advance_amt = round(agreement.agreed_price * 0.25, 2)
+    final_amt = round(agreement.agreed_price * 0.75, 2)
+
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return jsonify({"error": "amount must be a number"}), 400
+
+    if payment_type == "advance":
+        if abs(amount - advance_amt) > 0.01:
+            return jsonify({"error": f"Advance must be exactly 25% (Rs. {advance_amt:,.2f})"}), 400
+        existing = Payment.query.filter_by(
+            event_id=event_id, vendor_id=vendor_id, payment_type="advance", status="completed"
+        ).first()
+        if existing:
+            return jsonify({"error": "Advance already paid for this vendor"}), 400
+    else:
+        if abs(amount - final_amt) > 0.01:
+            return jsonify({"error": f"Final must be exactly 75% (Rs. {final_amt:,.2f})"}), 400
+        advance_paid = Payment.query.filter_by(
+            event_id=event_id, vendor_id=vendor_id, payment_type="advance", status="completed"
+        ).first()
+        if not advance_paid:
+            return jsonify({"error": "Must pay advance (25%) before final payment"}), 400
+        existing_final = Payment.query.filter_by(
+            event_id=event_id, vendor_id=vendor_id, payment_type="final", status="completed"
+        ).first()
+        if existing_final:
+            return jsonify({"error": "Final payment already made for this vendor"}), 400
+
+    total_budget = float(event.budget)
+    current_spent = float(event.total_spent or 0)
+    if current_spent + amount > total_budget:
+        return jsonify({"error": "Payment would exceed event budget"}), 400
+
+    payment = Payment(
+        event_id=event_id,
+        vendor_id=vendor_id,
+        payment_type=payment_type,
+        amount=amount,
+        currency="PKR",
+        status="completed",
+        payment_method=payment_method,
+        payment_date=datetime.now(),
+        notes=notes or None,
+    )
+    db.session.add(payment)
+    db.session.flush()
+
+    if payment_type == "advance":
+        agreement.payment_status = "advance_paid"
+    else:
+        agreement.payment_status = "completed"
+
+    event.total_spent = current_spent + amount
+    event.remaining_budget = total_budget - event.total_spent
+    db.session.commit()
+
+    create_notification(
+        vendor_id,
+        "Payment Received",
+        f"Organizer registered {payment_type} payment of Rs. {amount:,.2f} for '{event.name}'.",
+        "payment",
+        {"event_id": event_id, "payment_id": payment.id},
+    )
+
+    return jsonify({
+        "message": "Payment registered successfully",
+        "payment": payment.to_dict(),
+        "remaining_budget": float(event.remaining_budget),
+    }), 201
 
 
 # --- ORGANIZER PAYMENT REQUESTS (Phase 3) ---

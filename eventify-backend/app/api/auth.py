@@ -179,6 +179,17 @@ def verify_email(token):
     return jsonify({"message": "Email verified successfully!"}), 200
 
 
+@auth_bp.route("/me", methods=["GET"])
+@jwt_required()
+def get_me():
+    """Current user (flat object) for dashboard/layout. JWT required."""
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(user.to_dict()), 200
+
+
 # Add this to auth.py or create profile_routes.py
 
 # Add this to your auth.py file after the login route

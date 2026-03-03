@@ -11,7 +11,6 @@ import {
   Users,
   CreditCard,
   BarChart3,
-  Calculator,
   Bell,
   Menu,
   X,
@@ -41,7 +40,6 @@ const navItems = [
   { href: "/dashboard/events", label: "My Events", icon: Calendar },
   { href: "/dashboard/vendors", label: "Browse Vendors", icon: Users },
   { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
-  { href: "/dashboard/budget", label: "Budget Planner", icon: Calculator },
   { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
 ]
@@ -104,6 +102,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       const res = await fetch("http://localhost:5000/api/chat/unread-count", {
         headers: { Authorization: `Bearer ${token}` }
       })
+      if (res.status === 401) {
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("role")
+        document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+        document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+        router.push("/login")
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         setUnreadChatCount(data.unread_count || 0)
@@ -121,6 +128,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       const res = await fetch("http://localhost:5000/api/auth/me", {
         headers: { Authorization: `Bearer ${token}` }
       })
+      if (res.status === 401) {
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("role")
+        document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+        document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+        router.push("/login")
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         setUserData(data)
@@ -139,6 +155,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       const res = await fetch("http://localhost:5000/api/payments/notifications", {
         headers: { Authorization: `Bearer ${token}` }
       })
+      if (res.status === 401) {
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("role")
+        document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+        document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+        router.push("/login")
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         setNotifications(data.notifications || [])

@@ -11,10 +11,33 @@ vendors_bp = Blueprint("vendors", __name__, url_prefix="/api/vendors")
 @jwt_required()
 def get_vendors():
     try:
+        current_user_id = int(get_jwt_identity())
+        current_user = User.query.get(current_user_id)
+        if not current_user:
+            return jsonify({"error": "User not found"}), 404
+
         vendors = User.query.filter_by(role="vendor").all()
         vendor_list = []
         for v in vendors:
-            accepted_events = [e for e in v.assigned_events if e.organizer_id and e.organizer_status == 'accepted']
+            # For organizers: show all vendors so they can assign; accepted_events
+            # = events this organizer has assigned to this vendor (can be empty).
+            # For other roles: events where vendor is assigned and accepted.
+            if current_user.role == "organizer":
+                accepted_events = [
+                    e for e in v.assigned_events
+                    if e.organizer_id == current_user_id and e.organizer_status == "accepted"
+                ]
+            else:
+                accepted_events = [
+                    e for e in v.assigned_events
+                    if e.organizer_id and e.organizer_status == "accepted"
+                ]
+
+            # Show all vendors to organizers (so they can discover and assign);
+            # no longer skip vendors with zero assigned events from this organizer.
+
+            # Only events in completed_events have completed=True so "Verify work" shows
+            # only after the vendor marks work complete, not for newly assigned events.
             assigned_events_with_status = []
             for event in accepted_events:
                 ev_dict = event.to_dict()
@@ -68,6 +91,13 @@ def assign_vendor():
             
         if user.role != "organizer":
             return jsonify({"error": "Unauthorized: Only users with the 'organizer' role can perform this action."}), 403
+
+        # Enforce lifecycle: organizer can only assign vendors once the
+        # 25% advance payment has been completed for this event.
+        if event.status not in ("advance_payment_completed", "vendor_assigned"):
+            return jsonify({
+                "error": "Advance payment must be completed before assigning vendors to this event."
+            }), 403
 
         # Check if vendor is already assigned to this event
         if event in vendor.assigned_events:

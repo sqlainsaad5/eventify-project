@@ -17,7 +17,8 @@ import {
     Trash2,
     MoreVertical,
     Target,
-    MessageSquare
+    MessageSquare,
+    Wallet
 } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -41,6 +42,7 @@ interface Event {
     organizer_id?: number | null
     organizer_name?: string | null
     organizer_status?: string
+    status?: string
 }
 
 interface OrganizerRequest {
@@ -107,6 +109,37 @@ export default function MyEventsPage() {
         }
     }
 
+    const statusLabel = (status?: string) => {
+        switch (status) {
+            case "awaiting_organizer_confirmation":
+                return "Awaiting Organizer Confirmation"
+            case "pending_advance_payment":
+                return "Pending Advance Payment"
+            case "advance_payment_completed":
+                return "25% Payment Completed"
+            case "vendor_assigned":
+                return "Vendor Assigned"
+            case "completed":
+                return "Event Completed"
+            case "created":
+            default:
+                return "Created"
+        }
+    }
+
+    const organizerAdvanceLabel = (status?: string) => {
+        switch (status) {
+            case "pending":
+                return "25% advance requested"
+            case "paid":
+                return "25% advance paid"
+            case "rejected":
+                return "25% advance rejected"
+            default:
+                return status || ""
+        }
+    }
+
     return (
         <div className="min-h-screen bg-slate-50 font-sans pb-20">
             {/* ── Header ── */}
@@ -122,6 +155,12 @@ export default function MyEventsPage() {
                     </Link>
                     <div className="flex items-center gap-6">
                         <NotificationBell />
+                        <Link
+                            href="/my-events/budget"
+                            className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest"
+                        >
+                            <Wallet className="h-4 w-4" /> Budget Planner
+                        </Link>
                         <Link
                             href="/my-events/payments"
                             className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest"
@@ -165,6 +204,17 @@ export default function MyEventsPage() {
                         {events.map((event) => {
                             const requestsForEvent = organizerRequests.filter((r) => r.event_id === event.id)
                             const isPaid = requestsForEvent.length > 0 && requestsForEvent.every((r) => r.status !== "pending")
+                            const hasPendingAdvance = event.status === "pending_advance_payment" && requestsForEvent.some((r) => r.status === "pending")
+                            const hasPendingRequest = requestsForEvent.some((r) => r.status === "pending")
+                            const hasPaidRequest = requestsForEvent.some((r) => r.status === "paid")
+                            const hasRejectedRequest = requestsForEvent.some((r) => r.status === "rejected")
+                            const advanceStatus = hasPendingRequest
+                                ? "pending"
+                                : hasPaidRequest
+                                ? "paid"
+                                : hasRejectedRequest
+                                ? "rejected"
+                                : undefined
                             return (
                             <Card key={event.id} className={`group overflow-hidden border-none shadow-xl shadow-slate-200/60 transition-all duration-500 rounded-[40px] bg-white ${isPaid ? "opacity-85 border border-slate-200 hover:shadow-xl" : "hover:shadow-2xl hover:shadow-indigo-100"}`}>
                                 <div className="relative h-48 bg-slate-100 overflow-hidden">
@@ -296,11 +346,26 @@ export default function MyEventsPage() {
 
                                         <div className="space-y-3">
                                             <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                                                <span className="text-slate-400 italic">Planning State</span>
+                                                <span className="text-slate-400 italic">{statusLabel(event.status)}</span>
                                                 <span className="text-indigo-600">{event.progress}%</span>
                                             </div>
+                                            {advanceStatus && (
+                                                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-600">
+                                                    {organizerAdvanceLabel(advanceStatus)}
+                                                </div>
+                                            )}
                                             <Progress value={event.progress} className="h-2.5 bg-slate-50 border border-slate-100" />
                                         </div>
+
+                                        {hasPendingAdvance && (
+                                            <Button
+                                                onClick={() => router.push("/my-events/payments")}
+                                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl h-11 font-black uppercase tracking-widest text-[11px] gap-2 shadow-xl shadow-emerald-100"
+                                            >
+                                                <Wallet className="h-4 w-4" />
+                                                Pay 25% Advance
+                                            </Button>
+                                        )}
 
                                         {event.organizer_name && event.organizer_status === "accepted" && (
                                             <Button

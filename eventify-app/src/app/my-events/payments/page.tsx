@@ -37,6 +37,19 @@ interface PaymentRecord {
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount)
 
+const organizerAdvanceLabel = (status: OrganizerPaymentRequest["status"]) => {
+  switch (status) {
+    case "pending":
+      return "25% advance requested"
+    case "paid":
+      return "25% advance paid"
+    case "rejected":
+      return "25% advance rejected"
+    default:
+      return status
+  }
+}
+
 export default function MyEventsPaymentsPage() {
   const router = useRouter()
   const [organizerRequests, setOrganizerRequests] = useState<OrganizerPaymentRequest[]>([])
@@ -200,6 +213,12 @@ export default function MyEventsPaymentsPage() {
               <ArrowLeft className="h-4 w-4" /> My Events
             </Link>
             <Link
+              href="/my-events/budget"
+              className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest"
+            >
+              Budget Planner
+            </Link>
+            <Link
               href="/"
               className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest"
             >
@@ -252,6 +271,9 @@ export default function MyEventsPaymentsPage() {
                     </p>
                     <p className="font-bold text-slate-900">{r.organizer_name}</p>
                     <p className="text-sm text-slate-500">{r.description}</p>
+                    <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      {organizerAdvanceLabel(r.status)}
+                    </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xl font-black text-slate-900">

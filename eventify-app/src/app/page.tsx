@@ -24,6 +24,7 @@ import {
   CalendarDays,
   MessageSquare,
   Bot,
+  Wallet,
 } from "lucide-react"
 import {
   Sheet,
@@ -193,6 +194,14 @@ export default function HomePage() {
                           >
                             <MessageSquare className="h-4 w-4" />
                             Messages
+                          </Link>
+                          <Link
+                            href="/my-events/budget"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                          >
+                            <Wallet className="h-4 w-4" />
+                            Budget Planner
                           </Link>
                           <Link
                             href="/my-profile"

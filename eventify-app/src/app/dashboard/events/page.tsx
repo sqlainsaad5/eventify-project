@@ -45,6 +45,7 @@ interface Event {
   organizer_status?: string
   user_id?: number
   organizer_id?: number | null
+  status?: string
 }
 
 export default function AllEventsPage() {
@@ -56,6 +57,8 @@ export default function AllEventsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [activeTab, setActiveTab] = useState<"personal" | "assigned">("personal")
+  const [requestedAdvanceEventIds, setRequestedAdvanceEventIds] = useState<number[]>([])
+  const [completingEventId, setCompletingEventId] = useState<number | null>(null)
 
   useEffect(() => {
     fetchEvents()
@@ -137,11 +140,59 @@ export default function AllEventsPage() {
     }
   }
 
-  const filteredEvents = events.filter(e =>
+  const statusLabel = (status?: string) => {
+    switch (status) {
+      case "awaiting_organizer_confirmation":
+        return "Awaiting Organizer Confirmation"
+      case "pending_advance_payment":
+        return "Pending Advance Payment"
+      case "advance_payment_completed":
+        return "25% Payment Completed"
+      case "vendor_assigned":
+        return "Vendor Assigned"
+      case "completed":
+        return "Event Completed"
+      case "created":
+      default:
+        return "Created"
+    }
+  }
+
+  const matchesSearch = (e: Event) =>
     e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+
+  const isCompleted = (e: Event) =>
+    (typeof e.status === "string" && e.status.toLowerCase() === "completed") ||
+    Number(e.progress || 0) >= 100
+
+  const organizerAdvanceLabel = (status?: string) => {
+    switch (status) {
+      case "pending":
+        return "25% advance requested"
+      case "paid":
+        return "25% advance paid"
+      case "rejected":
+        return "25% advance rejected"
+      default:
+        return status || ""
+    }
+  }
+
+  const activePersonalEvents = events.filter(e => !isCompleted(e))
+  const completedPersonalEvents = events.filter(isCompleted)
+
+  const activeAssignedEvents = assignedEvents.filter(e => !isCompleted(e))
+  const completedAssignedEvents = assignedEvents.filter(isCompleted)
+
+  const filteredActivePersonal = activePersonalEvents.filter(matchesSearch)
+  const filteredCompletedPersonal = completedPersonalEvents.filter(matchesSearch)
+  const filteredActiveAssigned = activeAssignedEvents.filter(matchesSearch)
+  const filteredCompletedAssigned = completedAssignedEvents.filter(matchesSearch)
+
+  const activeList = activeTab === "personal" ? filteredActivePersonal : filteredActiveAssigned
+  const completedList = activeTab === "personal" ? filteredCompletedPersonal : filteredCompletedAssigned
 
   const getUserId = (): number | null => {
     try {
@@ -226,22 +277,49 @@ export default function AllEventsPage() {
             <Loader2 className="h-10 w-10 text-purple-600 animate-spin" />
             <p className="text-slate-500 font-bold animate-pulse uppercase tracking-widest text-[10px]">Assembling your events...</p>
           </div>
-        ) : (activeTab === "personal" ? events : assignedEvents).filter(e =>
-          e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
-        ).length > 0 ? (
+        ) : activeList.length > 0 ? (
           viewMode === "grid" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {(activeTab === "personal" ? events : assignedEvents).filter(e =>
-                e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
-              ).map((event) => {
+              {activeList.map((event) => {
                 const userId = getUserId()
-                const organizerPaid = userId != null && event.organizer_id === userId && organizerRequests.some((r) => r.event_id === event.id && r.status === "paid")
+                const organizerAdvancePaid = !!event.organizer_advance_paid
+                const organizerFinalPaid = !!event.organizer_final_paid
+                const organizerFullyPaid =
+                  userId != null &&
+                  event.organizer_id === userId &&
+                  organizerAdvancePaid &&
+                  organizerFinalPaid
+
+                const requestsForEvent = organizerRequests.filter((r) => r.event_id === event.id)
+
+                // Derive 25% advance status: pending/rejected only before it's paid,
+                // otherwise show as paid regardless of later 75% requests.
+                const hasPendingAdvanceRequest =
+                  !organizerAdvancePaid && requestsForEvent.some((r) => r.status === "pending")
+                const hasRejectedAdvanceRequest =
+                  !organizerAdvancePaid &&
+                  !hasPendingAdvanceRequest &&
+                  requestsForEvent.some((r) => r.status === "rejected")
+
+                const advanceStatus = organizerAdvancePaid
+                  ? "paid"
+                  : hasPendingAdvanceRequest
+                  ? "pending"
+                  : hasRejectedAdvanceRequest
+                  ? "rejected"
+                  : undefined
+
                 return (
-                <Card key={event.id} className={`group overflow-hidden border-slate-200/60 shadow-sm transition-all duration-500 rounded-[32px] bg-white ${activeTab === "assigned" ? "border-l-4 border-l-emerald-500" : ""} ${organizerPaid ? "opacity-85 border-slate-200 hover:shadow-lg" : "hover:shadow-2xl hover:shadow-purple-100"}`}>
+                <Card
+                  key={event.id}
+                  className={`group overflow-hidden border-slate-200/60 shadow-sm transition-all duration-500 rounded-[32px] bg-white ${
+                    activeTab === "assigned" ? "border-l-4 border-l-emerald-500" : ""
+                  } ${
+                    organizerFullyPaid
+                      ? "opacity-85 border-slate-200 hover:shadow-lg"
+                      : "hover:shadow-2xl hover:shadow-purple-100"
+                  }`}
+                >
                   <div className="relative h-48 bg-slate-100 overflow-hidden">
                     <img
                       src={event.image_url || `https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=500&q=80`}
@@ -253,14 +331,19 @@ export default function AllEventsPage() {
                       <Badge className="bg-white/90 backdrop-blur-md text-purple-600 border-none hover:bg-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
                         {event.vendor_category}
                       </Badge>
-                      {organizerPaid && (
-                        <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Paid</Badge>
+                      {organizerFullyPaid && (
+                        <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Fully Paid</Badge>
                       )}
                       {activeTab === "assigned" && (
                         <Badge className="bg-emerald-500 text-white border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
                           Managed Project
                         </Badge>
                       )}
+                      {event.status === "advance_payment_completed" || event.status === "vendor_assigned" ? (
+                        <Badge className="bg-emerald-100 text-emerald-700 border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                          25% Advance Payment Completed
+                        </Badge>
+                      ) : null}
                     </div>
                   </div>
                   <CardContent className="p-6">
@@ -322,8 +405,13 @@ export default function AllEventsPage() {
                               <Calendar className="h-3.5 w-3.5" />
                               {new Date(event.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                             </div>
-                            <div className="text-purple-600 font-black">
-                              ${(event.budget / 1000).toFixed(1)}k
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black text-slate-500">
+                                {statusLabel(event.status)}
+                              </span>
+                              <span className="text-purple-600 font-black">
+                                ${(event.budget / 1000).toFixed(1)}k
+                              </span>
                             </div>
                           </div>
 
@@ -337,10 +425,60 @@ export default function AllEventsPage() {
 
                           {activeTab === "assigned" && (
                             <div className="space-y-3">
-                              <Badge variant="outline" className={`w-full py-1.5 justify-center rounded-xl border-none font-black text-[9px] uppercase tracking-widest ${event.organizer_status === 'accepted' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
-                                }`}>
-                                {event.organizer_status === 'accepted' ? "Vision Active" : "Assignment Declined"}
+                              <Badge
+                                variant="outline"
+                                className={`w-full py-1.5 justify-center rounded-xl border-none font-black text-[9px] uppercase tracking-widest ${
+                                  event.organizer_status === "accepted"
+                                    ? "bg-emerald-50 text-emerald-600"
+                                    : "bg-red-50 text-red-600"
+                                }`}
+                              >
+                                {event.organizer_status === "accepted" ? "Vision Active" : "Assignment Declined"}
                               </Badge>
+
+                              {advanceStatus && (
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 text-center">
+                                  {organizerAdvanceLabel(advanceStatus)}
+                                </p>
+                              )}
+
+                              {event.status === "pending_advance_payment" && requestsForEvent.length === 0 && !requestedAdvanceEventIds.includes(event.id) && (
+                                <Button
+                                  onClick={async () => {
+                                    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+                                    try {
+                                      const res = await fetch(
+                                        `http://localhost:5000/api/events/${event.id}/create-advance-request`,
+                                        {
+                                          method: "POST",
+                                          headers: {
+                                            "Content-Type": "application/json",
+                                            Authorization: `Bearer ${token}`,
+                                          },
+                                        }
+                                      )
+                                      const data = await res.json()
+                                      if (res.ok) {
+                                        setRequestedAdvanceEventIds((prev) => [...prev, event.id])
+                                        toast.success("25% payment request sent to user")
+                                        fetchEvents()
+                                      } else {
+                                        toast.error(data.error || "Failed to create advance request")
+                                      }
+                                    } catch {
+                                      toast.error("Error creating advance request")
+                                    }
+                                  }}
+                                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 shadow-lg"
+                                >
+                                  Request 25% Advance
+                                </Button>
+                              )}
+                              {event.status === "pending_advance_payment" && (hasPendingAdvanceRequest || requestedAdvanceEventIds.includes(event.id)) && (
+                                <div className="w-full h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center justify-center bg-slate-100 text-slate-600 border border-slate-200">
+                                  Requested
+                                </div>
+                              )}
 
                               {event.organizer_status === "accepted" && (
                                 <Button
@@ -351,6 +489,47 @@ export default function AllEventsPage() {
                                   Message Client
                                 </Button>
                               )}
+
+                              {(event.status === "advance_payment_completed" || event.status === "vendor_assigned") &&
+                                typeof event.status === "string" &&
+                                event.status.toLowerCase() !== "completed" && (
+                                  <Button
+                                    disabled={completingEventId === event.id}
+                                    onClick={async () => {
+                                      const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+                                      if (!token) return router.push("/login")
+                                      setCompletingEventId(event.id)
+                                      try {
+                                        const res = await fetch(
+                                          `http://localhost:5000/api/events/${event.id}/complete`,
+                                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
+                                        )
+                                        const data = await res.json().catch(() => ({}))
+                                        if (res.ok) {
+                                          toast.success("Event marked as completed")
+                                          fetchEvents()
+                                        } else {
+                                          toast.error(data.error || "Failed to mark event as completed")
+                                        }
+                                      } catch (err) {
+                                        console.error(err)
+                                        toast.error("Failed to mark event as completed")
+                                      } finally {
+                                        setCompletingEventId(null)
+                                      }
+                                    }}
+                                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 shadow-lg"
+                                  >
+                                    {completingEventId === event.id ? (
+                                      <>
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        Completing...
+                                      </>
+                                    ) : (
+                                      "Complete event"
+                                    )}
+                                  </Button>
+                                )}
                             </div>
                           )}
                         </>
@@ -374,15 +553,23 @@ export default function AllEventsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {(activeTab === "personal" ? events : assignedEvents).filter(e =>
-                    e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).map((event) => {
+                  {activeList.map((event) => {
                     const userId = getUserId()
-                    const organizerPaid = userId != null && event.organizer_id === userId && organizerRequests.some((r) => r.event_id === event.id && r.status === "paid")
+                    const organizerAdvancePaid = !!event.organizer_advance_paid
+                    const organizerFinalPaid = !!event.organizer_final_paid
+                    const organizerFullyPaid =
+                      userId != null &&
+                      event.organizer_id === userId &&
+                      organizerAdvancePaid &&
+                      organizerFinalPaid
+
                     return (
-                    <tr key={event.id} className={`transition-colors group ${organizerPaid ? "bg-slate-50/80 opacity-90" : "hover:bg-slate-50/80"}`}>
+                    <tr
+                      key={event.id}
+                      className={`transition-colors group ${
+                        organizerFullyPaid ? "bg-slate-50/80 opacity-90" : "hover:bg-slate-50/80"
+                      }`}
+                    >
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0">
@@ -412,10 +599,13 @@ export default function AllEventsPage() {
                         <span className="font-black text-slate-900">${event.budget.toLocaleString()}</span>
                       </td>
                       <td className="px-6 py-5">
-                        <div className="w-32 space-y-1.5">
-                          {organizerPaid && (
+                        <div className="w-40 space-y-1.5">
+                          {organizerFullyPaid && (
                             <Badge className="bg-emerald-100 text-emerald-700 font-semibold mb-1">Paid</Badge>
                           )}
+                          <div className="text-[10px] font-bold text-slate-500 truncate">
+                            {statusLabel(event.status)}
+                          </div>
                           <div className="flex justify-between text-[10px] font-bold text-slate-400">
                             <span>{event.progress}%</span>
                           </div>
@@ -439,12 +629,67 @@ export default function AllEventsPage() {
               <Calendar className="h-10 w-10 text-slate-300" />
             </div>
             <h3 className="text-xl font-bold text-slate-900">Quiet on the Event Front</h3>
-            <p className="text-slate-500 mt-2 max-w-xs text-center font-medium">No events found matching your search. Start a new project to see it here.</p>
+            <p className="text-slate-500 mt-2 max-w-xs text-center font-medium">No active events found matching your search. Start a new project to see it here.</p>
             <Link href="/dashboard/events/new" className="mt-8">
               <Button className="bg-slate-900 hover:bg-slate-800 text-white rounded-2xl h-12 px-8">
                 Start Planning
               </Button>
             </Link>
+          </div>
+        )}
+        {!loading && completedList.length > 0 && (
+          <div className="mt-12 space-y-4">
+            <h2 className="text-lg font-bold text-slate-900">
+              Completed {activeTab === "personal" ? "Personal Projects" : "Assigned Projects"}
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {completedList.map((event) => (
+                <Card key={event.id} className="group overflow-hidden border-slate-200/60 shadow-sm rounded-[32px] bg-slate-50">
+                  <div className="relative h-40 bg-slate-100 overflow-hidden">
+                    <img
+                      src={event.image_url || `https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=500&q=80`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                      alt={event.name}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute top-4 left-4 flex gap-2">
+                      <Badge className="bg-white/90 backdrop-blur-md text-purple-600 border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                        {event.vendor_category}
+                      </Badge>
+                      <Badge className="bg-emerald-500 text-white border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                        Completed
+                      </Badge>
+                    </div>
+                  </div>
+                  <CardContent className="p-6">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-bold text-slate-900 truncate group-hover:text-purple-600 transition-colors">
+                          {event.name}
+                        </h3>
+                        <div className="flex items-center gap-2 text-slate-500 mt-1 text-xs font-medium">
+                          <MapPin className="h-3 w-3 text-purple-500" />
+                          <span className="truncate">{event.venue}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                        <span>Completed On</span>
+                        <span className="text-slate-600">
+                          {new Date(event.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                        <span>Final Progress</span>
+                        <span className="text-purple-600">100%</span>
+                      </div>
+                      <Progress value={100} className="h-2 bg-slate-100" />
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
       </div>

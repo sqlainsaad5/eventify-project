@@ -218,13 +218,44 @@ function VendorsPageContent() {
   const organizerId = getOrganizerId();
 
   const [verifyingKey, setVerifyingKey] = useState<string | null>(null);
+  const [authError, setAuthError] = useState(false);
+
+  const organizerEvents = useMemo(() => {
+    const baseEvents = Array.isArray(events) ? events : [];
+    if (!organizerId) return baseEvents;
+    return baseEvents.filter((event: any) => {
+      const ownerId = event?.organizer_id ?? event?.user_id ?? event?.owner_id ?? null;
+      const isOwner = ownerId === null || ownerId === organizerId;
+      const isCompleted =
+        (typeof event?.status === "string" && event.status.toLowerCase() === "completed") ||
+        Number(event?.progress) === 100;
+
+      const status: string | undefined =
+        typeof event?.status === "string" ? event.status.toLowerCase() : undefined;
+      const canAssignVendor =
+        !status ||
+        status === "advance_payment_completed" ||
+        status === "vendor_assigned";
+
+      return isOwner && !isCompleted && canAssignVendor;
+    });
+  }, [events, organizerId]);
 
   const loadVendors = async () => {
+    if (!token) {
+      setAuthError(true);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const res = await fetch("http://localhost:5000/api/vendors", {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) {
+        setAuthError(true);
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data)) {
         setVendors(data);
@@ -239,11 +270,18 @@ function VendorsPageContent() {
   };
 
   const loadEvents = async () => {
+    if (!token) {
+      setAuthError(true);
+      return;
+    }
     try {
-      if (!token) return;
       const res = await fetch("http://localhost:5000/api/events", {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) {
+        setAuthError(true);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         // Defensive normalization for unified event list
@@ -286,11 +324,18 @@ function VendorsPageContent() {
   };
 
   const fetchOrganizerConversations = useCallback(async () => {
-    if (!organizerId || !token) return;
+    if (!organizerId || !token) {
+      setAuthError(true);
+      return;
+    }
     try {
       const res = await fetch(`http://localhost:5000/api/chat/organizer/conversations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) {
+        setAuthError(true);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations || []);
@@ -298,7 +343,7 @@ function VendorsPageContent() {
     } catch (err) {
       console.error("Error fetching conversations:", err);
     }
-  }, [organizerId, token]);
+  }, [organizerId, token, setAuthError]);
 
   const fetchChatMessages = useCallback(async (vendorId: number) => {
     if (!organizerId || !token) return;
@@ -465,6 +510,27 @@ function VendorsPageContent() {
       toast({ title: "Something went wrong", variant: "destructive" });
     }
   };
+
+  if (authError) {
+    return (
+      <DashboardLayout>
+        <div className="flex h-[70vh] items-center justify-center">
+          <div className="text-center space-y-3">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Session expired</h1>
+            <p className="text-slate-500 text-sm font-medium">
+              Please log in again to access the organizer vendor dashboard.
+            </p>
+            <Button
+              className="mt-2 rounded-2xl px-6"
+              onClick={() => router.push("/login")}
+            >
+              Go to Login
+            </Button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -810,12 +876,14 @@ function VendorsPageContent() {
                   <SelectValue placeholder="Select an event ecosystem" />
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl border-slate-100 shadow-xl">
-                  {(Array.isArray(events) ? events : []).filter(event =>
+                  {organizerEvents.filter(event =>
                     !selectedVendor?.assigned_events?.some((ae: any) => ae.id === event.id)
                   ).length === 0 ? (
-                    <div className="p-4 text-center text-xs text-slate-400 font-bold uppercase tracking-widest">No unassigned active events found</div>
+                    <div className="p-4 text-center text-xs text-slate-400 font-bold uppercase tracking-widest">
+                      No eligible projects found. Create a project in \"Your Events\" or choose a vendor who is not already assigned.
+                    </div>
                   ) : (
-                    (Array.isArray(events) ? events : [])
+                    organizerEvents
                       .filter(event => !selectedVendor?.assigned_events?.some((ae: any) => ae.id === event.id))
                       .map((event) => (
                         <SelectItem key={event.id} value={String(event.id)} className="rounded-xl py-3 font-medium">

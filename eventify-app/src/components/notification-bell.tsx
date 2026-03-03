@@ -39,6 +39,13 @@ export function NotificationBell() {
             const res = await fetch("http://localhost:5000/api/payments/notifications", {
                 headers: { Authorization: `Bearer ${token}` }
             })
+            if (res.status === 401) {
+                // Session is no longer valid; clear auth so we stop polling with a bad token
+                localStorage.removeItem("token")
+                localStorage.removeItem("user")
+                localStorage.removeItem("role")
+                return
+            }
             if (res.ok) {
                 const data = await res.json()
                 setNotifications(data.notifications || [])

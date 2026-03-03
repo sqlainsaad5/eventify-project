@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal"
+import { toast } from "sonner"
 
 interface Payment {
   id: number
@@ -44,7 +45,12 @@ interface Event {
   payment_status: "unpaid" | "deposit_paid" | "partially_paid" | "fully_paid"
   deposit_amount?: number
   vendor_payments_total?: number
+  total_spent?: number
   organizer_id?: number | null
+   organizer_advance_paid?: boolean
+   organizer_final_requested?: boolean
+   organizer_final_paid?: boolean
+   status?: string
 }
 
 interface PaymentRequest {
@@ -88,6 +94,7 @@ export default function PaymentsPage() {
   const [currentPaymentId, setCurrentPaymentId] = useState<number | null>(null)
   const [organizerForm, setOrganizerForm] = useState({ event_id: "", amount: "", description: "Coordination fee" })
   const [organizerSubmitting, setOrganizerSubmitting] = useState(false)
+  const [completingEventId, setCompletingEventId] = useState<number | null>(null)
 
   const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
   const getUserId = (): number | null => {
@@ -99,13 +106,19 @@ export default function PaymentsPage() {
     } catch { return null }
   }
 
-  // Clear organizer form event selection if that event is already paid (e.g. after refetch)
+  // Clear organizer form event selection if that event is already paid or fully paid (e.g. after refetch)
   useEffect(() => {
     const paidEventIds = organizerRequests.filter((r) => r.status === "paid").map((r) => r.event_id)
     if (organizerForm.event_id && paidEventIds.includes(parseInt(organizerForm.event_id, 10))) {
-      setOrganizerForm((f) => ({ ...f, event_id: "" }))
+      setOrganizerForm((f) => ({ ...f, event_id: "", amount: "", description: "Coordination fee" }))
+      return
     }
-  }, [organizerRequests])
+    const eid = organizerForm.event_id ? parseInt(organizerForm.event_id, 10) : 0
+    const ev = events.find((e: any) => e.id === eid)
+    if (ev && ev.organizer_advance_paid && ev.organizer_final_paid) {
+      setOrganizerForm((f) => ({ ...f, event_id: "", amount: "", description: "Coordination fee" }))
+    }
+  }, [organizerRequests, events, organizerForm.event_id])
 
   const loadData = async () => {
     const token = getToken()
@@ -179,9 +192,42 @@ export default function PaymentsPage() {
         method: "PUT",
         headers: { "Authorization": `Bearer ${token}` }
       })
-      if (res.ok) loadData()
+      if (res.ok) {
+        toast.success("Payment rejected by user")
+        loadData()
+      } else {
+        const data = await res.json()
+        toast.error(data.error || "Failed to reject payment request")
+      }
     } catch (err) {
       console.error(err)
+      toast.error("Error rejecting payment request")
+    }
+  }
+
+  const handleSelectOrganizerEvent = async (value: string) => {
+    setOrganizerForm((f) => ({ ...f, event_id: value, amount: "" }))
+    if (!value) return
+    const token = getToken()
+    if (!token) {
+      router.push("/login")
+      return
+    }
+    try {
+      const eid = parseInt(value, 10)
+      const res = await fetch(`http://localhost:5000/api/events/${eid}/budget-summary`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        console.error("Failed to load budget summary", d)
+        return
+      }
+      const data = await res.json()
+      const remaining = Math.max(0, data.remaining_budget ?? 0)
+      setOrganizerForm((f) => ({ ...f, event_id: value, amount: remaining.toString() }))
+    } catch (err) {
+      console.error("Error loading budget summary", err)
     }
   }
 
@@ -190,8 +236,29 @@ export default function PaymentsPage() {
     const eid = organizerForm.event_id ? parseInt(organizerForm.event_id) : 0
     const amount = parseFloat(organizerForm.amount)
     if (!token || !eid || !amount || amount <= 0) return
+    const selectedEvent = events.find((e: any) => e.id === eid)
     setOrganizerSubmitting(true)
     try {
+      if (selectedEvent?.organizer_advance_paid === true && selectedEvent?.status === "completed") {
+        const res = await fetch(`http://localhost:5000/api/events/${eid}/create-final-request`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+        })
+        const data = await res.json()
+        if (res.status === 201) {
+          setOrganizerForm({ event_id: "", amount: "", description: "Coordination fee" })
+          loadData()
+          toast.success("75% payment request sent")
+        } else if (res.status === 200) {
+          loadData()
+          toast.info("A final payment request is already pending for this event")
+        } else if (res.status === 400) {
+          toast.error(data.error || "Failed to create final payment request")
+        } else {
+          toast.error(data.error || "Failed to create final payment request")
+        }
+        return
+      }
       const res = await fetch("http://localhost:5000/api/payments/organizer-request", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -201,15 +268,22 @@ export default function PaymentsPage() {
           description: organizerForm.description || "Coordination fee"
         })
       })
+      const d = await res.json().catch(() => ({}))
       if (res.ok) {
         setOrganizerForm({ event_id: "", amount: "", description: "Coordination fee" })
         loadData()
+      } else if (res.status === 403 && typeof d.error === "string" && d.error.includes("already been paid")) {
+        if (selectedEvent?.organizer_advance_paid === true && selectedEvent?.status !== "completed") {
+          toast.error("Mark the event as completed first, then request the remaining 75% payment.")
+        } else {
+          toast.error(d.error || "Failed to submit request")
+        }
       } else {
-        const d = await res.json()
-        alert(d.error || "Failed to submit request")
+        toast.error(d.error || "Failed to submit request")
       }
     } catch (err) {
       console.error(err)
+      toast.error("Failed to submit request")
     } finally {
       setOrganizerSubmitting(false)
     }
@@ -237,7 +311,7 @@ export default function PaymentsPage() {
       })
     }
     setIsCheckoutOpen(false)
-    alert("✅ Stripe Authorization Complete. Your liquidity status has been updated.")
+    toast.success("Payment received from user")
     loadData()
   }
 
@@ -318,14 +392,25 @@ export default function PaymentsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {events.map(event => {
               const userId = getUserId()
-              const organizerPaid = userId != null && event.organizer_id === userId && organizerRequests.some((r: OrganizerPaymentRequest) => r.event_id === event.id && r.status === "paid")
+              const organizerAdvancePaid = !!event.organizer_advance_paid
+              const organizerFinalPaid = !!event.organizer_final_paid
+              const organizerFullyPaid =
+                userId != null &&
+                event.organizer_id === userId &&
+                organizerAdvancePaid &&
+                organizerFinalPaid
               return (
-              <Card key={event.id} className={`rounded-[32px] border-slate-100 shadow-sm overflow-hidden p-6 transition-all border group ${organizerPaid ? "opacity-85 border-slate-200 hover:shadow-lg" : "hover:shadow-2xl hover:border-purple-200"}`}>
+              <Card
+                key={event.id}
+                className={`rounded-[32px] border-slate-100 shadow-sm overflow-hidden p-6 transition-all border group ${
+                  organizerFullyPaid ? "opacity-85 border-slate-200 hover:shadow-lg" : "hover:shadow-2xl hover:border-purple-200"
+                }`}
+              >
                 <div className="flex justify-between items-start mb-4">
                   <h3 className="font-black text-slate-900 uppercase tracking-tight">{event.name}</h3>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {organizerPaid && (
-                      <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Paid</Badge>
+                    {organizerFullyPaid && (
+                      <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Fully Paid</Badge>
                     )}
                     {getPaymentStatusBadge(event.payment_status)}
                   </div>
@@ -335,7 +420,7 @@ export default function PaymentsPage() {
                     <span>Stripe Funding</span>
                     <span>{formatCurrency(event.budget)}</span>
                   </div>
-                  <Progress value={(event.vendor_payments_total || 0) + (event.deposit_amount || 0) > 0 ? 50 : 0} className="h-2 bg-slate-50" />
+                  <Progress value={event.budget > 0 && event.total_spent != null ? Math.min(100, (event.total_spent / event.budget) * 100) : 0} className="h-2 bg-slate-50" />
 
                   {event.payment_status === "unpaid" ? (
                     <Button onClick={() => handleCreatePayment(event.id, event.budget * 0.25)} className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black uppercase text-[10px] tracking-widest">
@@ -401,15 +486,242 @@ export default function PaymentsPage() {
             {(() => {
               const userId = getUserId()
               const myEventsAsOwner = events.filter((e: any) => e.user_id === userId)
-              const myEventsAsOrganizer = events.filter(
-                (e: any) => e.organizer_id === userId && !organizerRequests.some((r: any) => r.event_id === e.id && r.status === "paid")
+              const myEventsAsOrganizer = events.filter((e: any) => e.organizer_id === userId)
+
+              // Derive organizer payment workflow stages for events where I'm the organizer
+              const advancePaidEvents = myEventsAsOrganizer.filter(
+                (e: any) => e.organizer_advance_paid && !e.organizer_final_paid
               )
+              const pendingFinalEvents = myEventsAsOrganizer.filter(
+                (e: any) => e.organizer_final_requested && !e.organizer_final_paid
+              )
+              const fullyPaidEvents = myEventsAsOrganizer.filter(
+                (e: any) => e.organizer_advance_paid && e.organizer_final_paid
+              )
+              const eventsEligibleForPaymentRequest = myEventsAsOrganizer.filter(
+                (e: any) => !(e.organizer_advance_paid && e.organizer_final_paid)
+              )
+
+              const findFinalRequestForEvent = (eventId: number) => {
+                const ev = events.find((e: any) => e.id === eventId)
+                if (!ev || !ev.budget) return null
+                const finalAmount = Math.round(ev.budget * 0.75 * 100) / 100
+                return organizerRequests
+                  .filter((r) => r.organizer_id === userId && r.event_id === eventId)
+                  .find((r) => Math.abs(r.amount - finalAmount) < 0.01)
+              }
+
               const pendingForMe = organizerRequests.filter(
                 (r) => r.status === "pending" && myEventsAsOwner.some((e: any) => e.id === r.event_id)
               )
               const myRequestsAsOrganizer = organizerRequests.filter((r) => r.organizer_id === userId)
               return (
                 <>
+                  {/* Organizer payment workflow sections */}
+                  {myEventsAsOrganizer.length > 0 && (
+                    <div className="space-y-6">
+                      {advancePaidEvents.length > 0 && (
+                        <Card className="p-6 rounded-[32px] border-slate-100 bg-emerald-50/40">
+                          <h3 className="text-xs font-black text-emerald-700 uppercase tracking-[0.3em] mb-4">
+                            25% Paid — Work In Progress
+                          </h3>
+                          <div className="grid gap-3">
+                            {advancePaidEvents.map((e: any) => (
+                              <div
+                                key={e.id}
+                                className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-emerald-100"
+                              >
+                                <div>
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    {e.name}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    25% advance has been paid. Continue working and mark the event as completed when done.
+                                  </p>
+                                  {e.status !== "completed" && (
+                                    <p className="text-[10px] text-amber-600 font-semibold mt-1">
+                                      Please complete work to request 75% payment.
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                  <Badge className="bg-emerald-100 text-emerald-700 border-none text-[10px] font-black uppercase tracking-widest">
+                                    25% Paid
+                                  </Badge>
+                                  <Badge variant="outline" className="border-slate-200 text-slate-600 text-[9px] font-bold uppercase">
+                                    75% Payment Pending
+                                  </Badge>
+                                  {e.status === "completed" && !e.organizer_final_requested ? (
+                                    <Button
+                                      size="sm"
+                                      onClick={async () => {
+                                        const token = getToken()
+                                        if (!token) return router.push("/login")
+                                        try {
+                                          const res = await fetch(
+                                            `http://localhost:5000/api/events/${e.id}/create-final-request`,
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type": "application/json",
+                                                Authorization: `Bearer ${token}`,
+                                              },
+                                            }
+                                          )
+                                          const data = await res.json()
+                                          if (res.ok) {
+                                            toast.success("75% payment request sent")
+                                            loadData()
+                                          } else {
+                                            toast.error(data.error || "Failed to create final payment request")
+                                          }
+                                        } catch (err) {
+                                          console.error(err)
+                                          toast.error("Error creating final payment request")
+                                        }
+                                      }}
+                                      className="h-9 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest"
+                                    >
+                                      Request 75% Payment
+                                    </Button>
+                                  ) : e.status !== "completed" ? (
+                                    <Button
+                                      size="sm"
+                                      disabled={completingEventId === e.id}
+                                      onClick={async () => {
+                                        const token = getToken()
+                                        if (!token) return router.push("/login")
+                                        setCompletingEventId(e.id)
+                                        try {
+                                          const res = await fetch(
+                                            `http://localhost:5000/api/events/${e.id}/complete`,
+                                            {
+                                              method: "POST",
+                                              headers: { Authorization: `Bearer ${token}` },
+                                            }
+                                          )
+                                          const data = await res.json().catch(() => ({}))
+                                          if (res.ok) {
+                                            toast.success("Event marked as completed. You can now request the 75% payment.")
+                                            loadData()
+                                          } else {
+                                            toast.error(data.error || "Failed to mark event as completed")
+                                          }
+                                        } catch (err) {
+                                          console.error(err)
+                                          toast.error("Failed to mark event as completed")
+                                        } finally {
+                                          setCompletingEventId(null)
+                                        }
+                                      }}
+                                      className="h-9 rounded-xl bg-slate-800 text-white font-black text-[10px] uppercase tracking-widest"
+                                    >
+                                      {completingEventId === e.id ? (
+                                        <>
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                                          Completing...
+                                        </>
+                                      ) : (
+                                        "Mark event as completed"
+                                      )}
+                                    </Button>
+                                  ) : (
+                                    <p className="text-[10px] text-slate-400 font-semibold">
+                                      Final payment already requested.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+                      )}
+
+                      {pendingFinalEvents.length > 0 && (
+                        <Card className="p-6 rounded-[32px] border-slate-100 bg-amber-50/60">
+                          <h3 className="text-xs font-black text-amber-700 uppercase tracking-[0.3em] mb-4">
+                            75% Payment Requested — Awaiting User
+                          </h3>
+                          <div className="space-y-3">
+                            {pendingFinalEvents.map((e: any) => {
+                              const finalReq = findFinalRequestForEvent(e.id)
+                              const requestedAt = finalReq?.created_at
+                                ? new Date(finalReq.created_at).toLocaleString()
+                                : null
+                              return (
+                                <div
+                                  key={e.id}
+                                  className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-amber-100"
+                                >
+                                  <div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                      {e.name}
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      Waiting for user to pay remaining 75%.
+                                    </p>
+                                    {requestedAt && (
+                                      <p className="text-[10px] text-slate-400 mt-1">
+                                        Requested at {requestedAt}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <Badge className="bg-amber-100 text-amber-800 border-none text-[10px] font-black uppercase tracking-widest">
+                                      75% Requested
+                                    </Badge>
+                                    <Badge variant="outline" className="border-amber-200 text-amber-700 text-[9px] font-bold uppercase">
+                                      Awaiting User Payment
+                                    </Badge>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </Card>
+                      )}
+
+                      {fullyPaidEvents.length > 0 && (
+                        <Card className="p-6 rounded-[32px] border-slate-100 bg-indigo-50/70">
+                          <h3 className="text-xs font-black text-indigo-800 uppercase tracking-[0.3em] mb-4">
+                            Fully Paid — Completed
+                          </h3>
+                          <div className="grid gap-3">
+                            {fullyPaidEvents.map((e: any) => (
+                              <div
+                                key={e.id}
+                                className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-indigo-100"
+                              >
+                                <div>
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    {e.name}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    Both 25% advance and 75% final payments have been received.
+                                  </p>
+                                  <p className="text-[10px] text-indigo-600 font-semibold mt-1">
+                                    All payments completed successfully.
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge className="bg-emerald-100 text-emerald-700 border-none text-[9px] font-black uppercase tracking-widest">
+                                    Advance Paid (25%)
+                                  </Badge>
+                                  <Badge className="bg-emerald-100 text-emerald-700 border-none text-[9px] font-black uppercase tracking-widest">
+                                    75% Paid
+                                  </Badge>
+                                  <Badge className="bg-indigo-600 text-white border-none text-[9px] font-black uppercase tracking-widest">
+                                    Fully Paid
+                                  </Badge>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+                      )}
+                    </div>
+                  )}
+
                   {pendingForMe.length > 0 && (
                     <Card className="p-6 rounded-[32px] border-slate-100">
                       <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Requests from organizer (pay now)</h3>
@@ -443,11 +755,11 @@ export default function PaymentsPage() {
                       <div className="flex flex-wrap gap-3 items-end mb-6">
                         <select
                           value={organizerForm.event_id}
-                          onChange={(e) => setOrganizerForm((f) => ({ ...f, event_id: e.target.value }))}
+                          onChange={(e) => handleSelectOrganizerEvent(e.target.value)}
                           className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium min-w-[180px]"
                         >
                           <option value="">Select event</option>
-                          {myEventsAsOrganizer.map((e: any) => (
+                          {eventsEligibleForPaymentRequest.map((e: any) => (
                             <option key={e.id} value={e.id}>{e.name}</option>
                           ))}
                         </select>
@@ -455,8 +767,8 @@ export default function PaymentsPage() {
                           type="number"
                           placeholder="Amount"
                           value={organizerForm.amount}
-                          onChange={(e) => setOrganizerForm((f) => ({ ...f, amount: e.target.value }))}
-                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium w-28"
+                          readOnly
+                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium w-28 bg-slate-50 cursor-not-allowed"
                         />
                         <input
                           type="text"
