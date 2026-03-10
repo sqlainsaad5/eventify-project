@@ -93,6 +93,8 @@ export function NotificationBell() {
                 router.push("/vendor/bookings")
             } else if (role === "user" && (n.type === "payment" || n.extra_data?.organizer_request_id)) {
                 router.push("/my-events/payments")
+            } else if (n.extra_data?.action === "open_events" && role === "organizer") {
+                router.push("/dashboard/open-events")
             } else if (n.extra_data?.event_id) {
                 if (role === "user") {
                     router.push("/my-events")

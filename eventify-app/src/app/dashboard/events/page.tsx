@@ -64,6 +64,18 @@ export default function AllEventsPage() {
     fetchEvents()
   }, [])
 
+  useEffect(() => {
+    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+    if (!token) return
+    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "assignment_review" }),
+    }).then(() => {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("refresh-notifications"))
+    }).catch(() => {})
+  }, [])
+
   const fetchEvents = async () => {
     setLoading(true)
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()

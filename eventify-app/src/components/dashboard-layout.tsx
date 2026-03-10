@@ -19,7 +19,8 @@ import {
   User,
   LogOut,
   Settings,
-  MessageSquare
+  MessageSquare,
+  Briefcase
 } from "lucide-react"
 import { NotificationBell } from "@/components/notification-bell"
 import { cn } from "@/lib/utils"
@@ -38,6 +39,7 @@ import { useEffect } from "react"
 const navItems = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/events", label: "My Events", icon: Calendar },
+  { href: "/dashboard/open-events", label: "Open Events", icon: Briefcase },
   { href: "/dashboard/vendors", label: "Browse Vendors", icon: Users },
   { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
@@ -51,6 +53,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [userData, setUserData] = useState<any>(null)
   const [notifications, setNotifications] = useState<any[]>([])
   const [unreadChatCount, setUnreadChatCount] = useState(0)
+  const [openEventsCount, setOpenEventsCount] = useState(0)
 
   useEffect(() => {
     // 1. Get User Data and Role Security
@@ -84,14 +87,23 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     // 3. Initial Notifications Fetch
     fetchNotifications()
     fetchUnreadChatCount()
+    fetchOpenEventsCount()
 
     // 4. Set Polling Interval
     const interval = setInterval(() => {
       fetchNotifications()
       fetchUnreadChatCount()
+      fetchOpenEventsCount()
     }, 30000)
 
-    return () => clearInterval(interval)
+    const onRefreshNotifications = () => {
+      fetchNotifications()
+    }
+    window.addEventListener("refresh-notifications", onRefreshNotifications)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener("refresh-notifications", onRefreshNotifications)
+    }
   }, [])
 
   const fetchUnreadChatCount = async () => {
@@ -117,6 +129,24 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       }
     } catch (err) {
       console.error("Failed to fetch unread chat count:", err)
+    }
+  }
+
+  const fetchOpenEventsCount = async () => {
+    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+    if (!token) return
+    try {
+      const res = await fetch("http://localhost:5000/api/events/open/count", {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setOpenEventsCount(data.count ?? 0)
+      } else {
+        setOpenEventsCount(0)
+      }
+    } catch (err) {
+      setOpenEventsCount(0)
     }
   }
 
@@ -284,6 +314,25 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className={cn("h-4.5 w-4.5", isActive ? "text-purple-600" : "text-slate-400")} />
                   <span>{item.label}</span>
+                  {item.label === "My Events" && (() => {
+                    const count = notifications.filter((n: any) => !n.is_read && n.extra_data?.action === "assignment_review").length
+                    return count > 0 ? (
+                      <span className={cn(
+                        "ml-auto flex min-w-[20px] h-5 px-1.5 items-center justify-center rounded-full text-[10px] font-bold",
+                        isActive ? "bg-purple-600 text-white" : "bg-amber-500 text-white"
+                      )}>
+                        {count}
+                      </span>
+                    ) : null
+                  })()}
+                  {item.label === "Open Events" && openEventsCount > 0 && (
+                    <span className={cn(
+                      "ml-auto flex min-w-[20px] h-5 px-1.5 items-center justify-center rounded-full text-[10px] font-bold",
+                      isActive ? "bg-purple-600 text-white" : "bg-emerald-500 text-white"
+                    )}>
+                      {openEventsCount}
+                    </span>
+                  )}
                   {item.label === "Browse Vendors" && unreadChatCount > 0 && (
                     <span className={cn(
                       "ml-auto flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",

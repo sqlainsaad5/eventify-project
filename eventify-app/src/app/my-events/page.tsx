@@ -43,6 +43,18 @@ interface Event {
     organizer_name?: string | null
     organizer_status?: string
     status?: string
+    application_count?: number
+}
+
+interface Application {
+    id: number
+    event_id: number
+    organizer_id: number
+    organizer_name: string | null
+    organizer_email: string | null
+    message: string | null
+    status: string
+    created_at: string | null
 }
 
 interface OrganizerRequest {
@@ -55,6 +67,10 @@ export default function MyEventsPage() {
     const [events, setEvents] = useState<Event[]>([])
     const [organizerRequests, setOrganizerRequests] = useState<OrganizerRequest[]>([])
     const [loading, setLoading] = useState(true)
+    const [applicationsModalEventId, setApplicationsModalEventId] = useState<number | null>(null)
+    const [applications, setApplications] = useState<Application[]>([])
+    const [loadingApplications, setLoadingApplications] = useState(false)
+    const [assigningOrganizerId, setAssigningOrganizerId] = useState<number | null>(null)
     const router = useRouter()
 
     useEffect(() => {
@@ -106,6 +122,56 @@ export default function MyEventsPage() {
             }
         } catch (err) {
             toast.error("Failed to delete event")
+        }
+    }
+
+    const openApplicationsModal = async (eventId: number) => {
+        setApplicationsModalEventId(eventId)
+        setApplications([])
+        setLoadingApplications(true)
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+        try {
+            const res = await fetch(`http://localhost:5000/api/events/${eventId}/applications`, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+            if (res.ok) {
+                const data = await res.json()
+                setApplications(Array.isArray(data) ? data : [])
+            } else {
+                toast.error("Failed to load applications")
+            }
+        } catch (err) {
+            toast.error("Failed to load applications")
+        } finally {
+            setLoadingApplications(false)
+        }
+    }
+
+    const handleAssignOrganizer = async (eventId: number, organizerId: number) => {
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+        if (!token) return
+        setAssigningOrganizerId(organizerId)
+        try {
+            const res = await fetch(`http://localhost:5000/api/events/${eventId}/assign-organizer`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ organizer_id: organizerId }),
+            })
+            if (res.ok) {
+                toast.success("Organizer assigned successfully")
+                setApplicationsModalEventId(null)
+                fetchEvents()
+            } else {
+                const data = await res.json()
+                toast.error(data.error || "Failed to assign organizer")
+            }
+        } catch (err) {
+            toast.error("Failed to assign organizer")
+        } finally {
+            setAssigningOrganizerId(null)
         }
     }
 
@@ -186,14 +252,30 @@ export default function MyEventsPage() {
                     <h1 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
                         My Added Events
                     </h1>
-                    <p className="text-lg text-white/70 font-medium max-w-xl mx-auto">
+                    <p className="text-lg text-white/70 font-medium max-w-xl mx-auto mb-6">
                         Review and manage the personal visions you've shared with us.
                     </p>
+                    <Link href="/event-details">
+                        <Button className="bg-white text-indigo-600 hover:bg-white/90 font-black rounded-2xl h-12 px-6 shadow-xl gap-2">
+                            <Plus className="h-5 w-5" />
+                            Create Event
+                        </Button>
+                    </Link>
                 </div>
             </div>
 
             {/* ── Content ── */}
             <main className="container mx-auto px-6 py-12 max-w-6xl">
+                {!loading && events.length > 0 && (
+                    <div className="flex justify-end mb-6">
+                        <Link href="/event-details">
+                            <Button className="rounded-2xl font-black uppercase tracking-widest text-[10px] gap-2 bg-indigo-600 hover:bg-indigo-700">
+                                <Plus className="h-4 w-4" />
+                                Create Event
+                            </Button>
+                        </Link>
+                    </div>
+                )}
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-32 space-y-4">
                         <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
@@ -292,7 +374,30 @@ export default function MyEventsPage() {
                                                 </div>
                                             </div>
                                         )}
-                                        {!event.organizer_name && (
+                                        {!event.organizer_name && event.status === "created" && (
+                                            <div className="flex flex-col gap-3 bg-emerald-50 p-4 rounded-3xl border border-emerald-100 mb-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-100">
+                                                        <Target className="h-5 w-5" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 leading-none mb-1">Open for organizers</p>
+                                                        <p className="text-sm font-black text-emerald-900 leading-none">
+                                                            {event.application_count != null && event.application_count > 0
+                                                                ? `${event.application_count} application(s)`
+                                                                : "Organizers can apply"}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    onClick={() => openApplicationsModal(event.id)}
+                                                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-10 font-black uppercase tracking-widest text-[10px]"
+                                                >
+                                                    View applications
+                                                </Button>
+                                            </div>
+                                        )}
+                                        {!event.organizer_name && event.status !== "created" && (
                                             <div
                                                 onClick={() => router.push('/event-details')}
                                                 className="flex items-center gap-3 bg-slate-50 p-4 rounded-3xl border border-slate-200 mb-4 cursor-pointer hover:bg-slate-100/50 transition-colors group/status"
@@ -398,6 +503,74 @@ export default function MyEventsPage() {
                     </div>
                 )}
             </main>
+
+            {/* Applications modal */}
+            {applicationsModalEventId !== null && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+                    onClick={() => setApplicationsModalEventId(null)}
+                >
+                    <div
+                        className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[80vh] flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="p-6 border-b border-slate-100">
+                            <h3 className="text-lg font-black text-slate-900">Applications</h3>
+                            <p className="text-sm text-slate-500 mt-1">Choose an organizer to assign to this event.</p>
+                        </div>
+                        <div className="p-6 overflow-y-auto flex-1">
+                            {loadingApplications ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" />
+                                </div>
+                            ) : applications.length === 0 ? (
+                                <p className="text-slate-500 text-sm font-medium py-6 text-center">
+                                    No applications yet. Your event is visible to active organizers; they can apply from their dashboard.
+                                </p>
+                            ) : (
+                                <ul className="space-y-3">
+                                    {applications.filter((a) => a.status === "pending").map((app) => (
+                                        <li
+                                            key={app.id}
+                                            className="flex items-center justify-between gap-4 p-4 rounded-2xl border border-slate-100 bg-slate-50/50"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <p className="font-bold text-slate-900 truncate">{app.organizer_name || "Organizer"}</p>
+                                                {app.organizer_email && (
+                                                    <p className="text-xs text-slate-500 truncate">{app.organizer_email}</p>
+                                                )}
+                                                {app.message && (
+                                                    <p className="text-xs text-slate-600 mt-1 line-clamp-2">{app.message}</p>
+                                                )}
+                                            </div>
+                                            <Button
+                                                onClick={() => handleAssignOrganizer(applicationsModalEventId, app.organizer_id)}
+                                                disabled={assigningOrganizerId !== null}
+                                                className="shrink-0 rounded-xl bg-indigo-600 hover:bg-indigo-700 font-black text-[10px] uppercase"
+                                            >
+                                                {assigningOrganizerId === app.organizer_id ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    "Assign"
+                                                )}
+                                            </Button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div className="p-6 border-t border-slate-100">
+                            <Button
+                                variant="outline"
+                                onClick={() => setApplicationsModalEventId(null)}
+                                className="w-full rounded-xl"
+                            >
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

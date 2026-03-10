@@ -56,6 +56,7 @@ export default function EventDetailsPage() {
     const [organizers, setOrganizers] = useState<any[]>([])
     const [loadingOrganizers, setLoadingOrganizers] = useState(true)
     const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null)
+    const [postForApplications, setPostForApplications] = useState(false)
 
     useEffect(() => {
         const storedUser = localStorage.getItem("user")
@@ -132,8 +133,13 @@ export default function EventDetailsPage() {
         formDataToSend.append("venue", formData.venue)
         formDataToSend.append("budget", formData.budget)
         formDataToSend.append("vendor_category", formData.vendor_category)
-        if (selectedOrgId) {
+        if (!postForApplications && selectedOrgId) {
             formDataToSend.append("organizer_id", selectedOrgId.toString())
+        }
+        if (!postForApplications && !selectedOrgId) {
+            toast.error("Please select an organizer or choose 'Post for organizers to apply'")
+            setLoading(false)
+            return
         }
         if (selectedFile) {
             formDataToSend.append("image", selectedFile)
@@ -250,23 +256,54 @@ export default function EventDetailsPage() {
                     {/* ─ Left Column ─ */}
                     <div className="lg:col-span-2 space-y-6">
 
-                        {/* Card: Assign Organizer - MOVED TO FRONT */}
+                        {/* Card: Assign Organizer or Post for Applications */}
                         <div className="bg-white rounded-[40px] border border-slate-100 shadow-xl shadow-slate-100/60 overflow-hidden">
                             <div className="px-8 pt-8 pb-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                                 <div>
                                     <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
                                         <Users className="h-5 w-5 text-indigo-600" /> 1. Select Your Event Expert
                                     </h2>
-                                    <p className="text-sm text-slate-400 font-medium mt-1 uppercase tracking-widest text-[10px] font-black">Choosing who will handle your vision</p>
+                                    <p className="text-sm text-slate-400 font-medium mt-1 uppercase tracking-widest text-[10px] font-black">Choose now or let organizers apply</p>
                                 </div>
-                                {selectedOrgId && (
+                                {postForApplications && (
+                                    <Badge className="bg-emerald-600 text-white border-none font-black text-[10px] uppercase tracking-widest px-4 py-1.5 rounded-full">
+                                        Post for Applications
+                                    </Badge>
+                                )}
+                                {!postForApplications && selectedOrgId && (
                                     <Badge className="bg-indigo-600 text-white border-none font-black text-[10px] uppercase tracking-widest px-4 py-1.5 rounded-full">
                                         Expert Selected
                                     </Badge>
                                 )}
                             </div>
-                            <div className="p-8">
-                                {loadingOrganizers ? (
+                            <div className="p-8 space-y-6">
+                                <div className="flex flex-wrap gap-4">
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="organizerChoice"
+                                            checked={!postForApplications}
+                                            onChange={() => setPostForApplications(false)}
+                                            className="h-4 w-4 text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-sm font-bold text-slate-700">Select an organizer now</span>
+                                    </label>
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="organizerChoice"
+                                            checked={postForApplications}
+                                            onChange={() => setPostForApplications(true)}
+                                            className="h-4 w-4 text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-sm font-bold text-slate-700">Post for organizers to apply</span>
+                                    </label>
+                                </div>
+                                {postForApplications ? (
+                                    <p className="text-slate-500 text-sm font-medium py-4">
+                                        Your event will be visible to all active organizers. They can apply and you can choose one from the applications later in My Events.
+                                    </p>
+                                ) : loadingOrganizers ? (
                                     <div className="flex items-center justify-center py-12">
                                         <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" />
                                     </div>

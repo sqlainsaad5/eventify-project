@@ -373,9 +373,9 @@ def login():
 @auth_bp.route("/organizers", methods=["GET"])
 @jwt_required()
 def get_organizers():
-    """Get all users with the 'organizer' role"""
+    """Get all active users with the 'organizer' role"""
     try:
-        organizers = User.query.filter_by(role='organizer').all()
+        organizers = User.query.filter_by(role='organizer', is_active=True).all()
         return jsonify([o.to_dict() for o in organizers]), 200
     except Exception as e:
         print(f"❌ Error fetching organizers: {e}")

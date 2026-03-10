@@ -145,6 +145,36 @@ class Event(db.Model):
             "assigned_vendors": [vendor.name for vendor in self.assigned_vendors] if self.assigned_vendors else []
         }
 
+
+class EventApplication(db.Model):
+    """Organizer applications for open events (freelance-style flow)."""
+    __tablename__ = "event_application"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    message = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default="pending")  # pending, accepted, rejected
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    __table_args__ = (db.UniqueConstraint("event_id", "organizer_id", name="uq_event_application_event_organizer"),)
+
+    event = db.relationship("Event", backref=db.backref("applications", lazy="dynamic"))
+    organizer = db.relationship("User", backref=db.backref("event_applications", lazy="dynamic"))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "organizer_id": self.organizer_id,
+            "organizer_name": self.organizer.name if self.organizer else None,
+            "organizer_email": self.organizer.email if self.organizer else None,
+            "message": self.message,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
  # Add this to your existing models.py
 
 class PaymentRequest(db.Model):

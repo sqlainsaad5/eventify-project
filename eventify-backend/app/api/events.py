@@ -1,7 +1,8 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from sqlalchemy import func
 from app.extensions import db
-from app.models import Event, User, EventVendorAgreement, Payment
+from app.models import Event, User, EventVendorAgreement, Payment, EventApplication
 import os
 import uuid
 from collections import defaultdict
@@ -92,11 +93,22 @@ def list_events():
         for p in payments:
             totals[p.event_id] += float(p.amount or 0)
 
+    open_event_ids = [e.id for e in created_events if e.organizer_id is None and e.status == "created"]
+    app_counts = defaultdict(int)
+    if open_event_ids:
+        counts = db.session.query(EventApplication.event_id, func.count(EventApplication.id)).filter(
+            EventApplication.event_id.in_(open_event_ids)
+        ).group_by(EventApplication.event_id).all()
+        for eid, c in counts:
+            app_counts[eid] = c
+
     def event_to_dict_with_spent(e):
         d = e.to_dict()
         spent = totals.get(e.id, 0.0)
         d["total_spent"] = spent
         d["remaining_budget"] = float(e.budget or 0) - spent
+        if e.organizer_id is None and e.status == "created":
+            d["application_count"] = app_counts.get(e.id, 0)
         return d
 
     return jsonify({
@@ -187,12 +199,12 @@ def create_event():
         db.session.add(event)
         db.session.commit()
 
-        # Notify Organizer
+        # Notify Organizer (if one was selected)
         if organizer_id:
             try:
                 from app.api.payments import create_notification
                 create_notification(
-                    organizer_id,
+                    int(organizer_id),
                     "📅 New Event Assignment",
                     f"A new event '{event.name}' has been assigned to you. Review the details and respond.",
                     "priority",
@@ -200,6 +212,21 @@ def create_event():
                 )
             except Exception as e:
                 print(f"Organizer notification failed: {e}")
+        else:
+            # Event posted for applications: notify all active organizers
+            try:
+                from app.api.payments import create_notification
+                organizers = User.query.filter_by(role="organizer", is_active=True).all()
+                for org in organizers:
+                    create_notification(
+                        org.id,
+                        "📋 New Open Event",
+                        f"A new event '{event.name}' has been posted. View Open Events to apply.",
+                        "info",
+                        {"event_id": event.id, "action": "open_events"}
+                    )
+            except Exception as e:
+                print(f"Notify organizers of new open event failed: {e}")
 
         suggestions = generate_ai_suggestions(event.vendor_category, event.budget)
 
@@ -213,6 +240,179 @@ def create_event():
         print(f"❌ Error in create_event: {str(e)}")
         db.session.rollback()
         return jsonify({"error": "Internal server error"}), 500
+
+
+# --- OPEN EVENTS & ORGANIZER APPLICATIONS (freelance-style) ---
+
+@events_bp.route("/open/count", methods=["GET"])
+@jwt_required()
+def open_events_count():
+    """Return count of open events for organizers (for sidebar badge)."""
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    if not user or user.role != "organizer":
+        return jsonify({"count": 0}), 200
+    applied_event_ids = [
+        a.event_id for a in EventApplication.query.filter_by(organizer_id=user_id).all()
+    ]
+    query = Event.query.filter(
+        Event.organizer_id.is_(None),
+        Event.status == "created"
+    )
+    if applied_event_ids:
+        query = query.filter(~Event.id.in_(applied_event_ids))
+    count = query.count()
+    return jsonify({"count": count}), 200
+
+
+@events_bp.route("/open", methods=["GET"])
+@jwt_required()
+def list_open_events():
+    """List events with no organizer (status=created). Organizers only. Exclude events current user already applied to."""
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.role != "organizer":
+        return jsonify({"error": "Only organizers can view open events"}), 403
+
+    applied_event_ids = [
+        a.event_id for a in EventApplication.query.filter_by(organizer_id=user_id).all()
+    ]
+    query = Event.query.filter(
+        Event.organizer_id.is_(None),
+        Event.status == "created"
+    )
+    if applied_event_ids:
+        query = query.filter(~Event.id.in_(applied_event_ids))
+    open_events = query.all()
+
+    return jsonify([e.to_dict() for e in open_events]), 200
+
+
+@events_bp.route("/<int:event_id>/apply", methods=["POST"])
+@jwt_required()
+def apply_to_event(event_id):
+    """Organizer applies to an open event. Optional body: { \"message\": \"...\" }."""
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.role != "organizer":
+        return jsonify({"error": "Only organizers can apply to events"}), 403
+
+    event = Event.query.filter_by(id=event_id).first()
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    if event.organizer_id is not None:
+        return jsonify({"error": "Event already has an organizer"}), 400
+    if event.status != "created":
+        return jsonify({"error": "Event is not open for applications"}), 400
+
+    existing = EventApplication.query.filter_by(event_id=event_id, organizer_id=user_id).first()
+    if existing:
+        return jsonify({"error": "You have already applied to this event"}), 409
+
+    data = request.get_json() or {}
+    message = (data.get("message") or "").strip() or None
+
+    app = EventApplication(event_id=event_id, organizer_id=user_id, message=message, status="pending")
+    db.session.add(app)
+    db.session.commit()
+
+    try:
+        from app.api.payments import create_notification
+        create_notification(
+            event.user_id,
+            "New application",
+            f"An organizer has applied to your event '{event.name}'.",
+            "info",
+            {"event_id": event.id, "action": "view_applications"}
+        )
+    except Exception as e:
+        print(f"Application notification failed: {e}")
+
+    return jsonify({"message": "Application submitted", "application": app.to_dict()}), 201
+
+
+@events_bp.route("/<int:event_id>/applications", methods=["GET"])
+@jwt_required()
+def list_event_applications(event_id):
+    """List applications for an event. Event owner only."""
+    user_id = get_jwt_identity()
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid user"}), 401
+    event = Event.query.filter_by(id=event_id).first()
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    if event.user_id != user_id:
+        return jsonify({"error": "Only the event owner can view applications"}), 403
+
+    applications = EventApplication.query.filter_by(event_id=event_id).order_by(EventApplication.created_at.desc()).all()
+    return jsonify([a.to_dict() for a in applications]), 200
+
+
+@events_bp.route("/<int:event_id>/assign-organizer", methods=["POST"])
+@jwt_required()
+def assign_organizer_to_event(event_id):
+    """Event owner assigns an organizer from applicants. Body: { \"organizer_id\": <id> }."""
+    user_id = get_jwt_identity()
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid user"}), 401
+    event = Event.query.filter_by(id=event_id).first()
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    if event.user_id != user_id:
+        return jsonify({"error": "Only the event owner can assign an organizer"}), 403
+    if event.organizer_id is not None:
+        return jsonify({"error": "Event already has an organizer"}), 400
+    if event.status != "created":
+        return jsonify({"error": "Event is not open for assignment"}), 400
+
+    data = request.get_json() or {}
+    organizer_id = data.get("organizer_id")
+    if organizer_id is None:
+        return jsonify({"error": "organizer_id required"}), 400
+    try:
+        organizer_id = int(organizer_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "organizer_id must be an integer"}), 400
+
+    application = EventApplication.query.filter_by(
+        event_id=event_id, organizer_id=organizer_id, status="pending"
+    ).first()
+    if not application:
+        return jsonify({"error": "Organizer has not applied or application is not pending"}), 400
+
+    organizer = User.query.get(organizer_id)
+    if not organizer or organizer.role != "organizer":
+        return jsonify({"error": "Invalid organizer"}), 400
+
+    event.organizer_id = organizer_id
+    event.status = "awaiting_organizer_confirmation"
+    event.organizer_status = "pending"
+    application.status = "accepted"
+    for other in EventApplication.query.filter_by(event_id=event_id).filter(EventApplication.id != application.id).all():
+        other.status = "rejected"
+    db.session.commit()
+
+    try:
+        from app.api.payments import create_notification
+        create_notification(
+            int(organizer_id),
+            "New Event Assignment",
+            f"A new event '{event.name}' has been assigned to you. Review the details and respond.",
+            "priority",
+            {"event_id": event.id, "action": "assignment_review"}
+        )
+    except Exception as e:
+        print(f"Assign organizer notification failed: {e}")
+
+    return jsonify({"message": "Organizer assigned successfully", "event": event.to_dict()}), 200
 
 
 # ✅ Update existing event

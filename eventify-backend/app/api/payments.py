@@ -645,3 +645,24 @@ def clear_all_notifications():
             n['is_read'] = True
             count += 1
     return jsonify({"message": f"Cleared {count} notifications"}), 200
+
+
+@payments_bp.route("/notifications/mark-read-by-action", methods=["PUT"])
+@jwt_required()
+def mark_read_by_action():
+    """Mark all notifications for the current user with the given extra_data.action as read (e.g. after viewing My Events or Open Events)."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    action = data.get("action")
+    if not action:
+        return jsonify({"error": "action required"}), 400
+    count = 0
+    for n in demo_notifications:
+        if int(n['user_id']) != user_id:
+            continue
+        if not n.get('extra_data') or n['extra_data'].get('action') != action:
+            continue
+        if not n['is_read']:
+            n['is_read'] = True
+            count += 1
+    return jsonify({"message": f"Marked {count} notifications as read"}), 200
