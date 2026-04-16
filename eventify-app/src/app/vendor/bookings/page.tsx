@@ -354,7 +354,7 @@ export default function VendorBookingsPage() {
                         </p>
                         <p className="text-xs text-slate-500 flex items-center gap-1.5">
                           <DollarSign className="h-3 w-3 text-slate-400" />
-                          Budget: ${event.budget?.toLocaleString()}
+                          Budget: Rs. {event.budget?.toLocaleString()}
                         </p>
                       </div>
 
@@ -431,7 +431,7 @@ export default function VendorBookingsPage() {
                           </p>
                           <p className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
                             <DollarSign className="h-3 w-3" />
-                            Estimated Payment: ${paymentAmount.toLocaleString()}
+                            Estimated Payment: Rs. {paymentAmount.toLocaleString()}
                           </p>
                           {event.verified && !event.payment_request_status && (
                             <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">

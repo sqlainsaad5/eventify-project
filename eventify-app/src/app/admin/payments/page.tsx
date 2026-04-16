@@ -418,7 +418,7 @@ export default function AdminPaymentsPage() {
                             </TableCell>
                             <TableCell>{r.vendor_name || `#${r.vendor_id}`}</TableCell>
                             <TableCell>
-                              ${Number(r.amount).toFixed(2)}
+                              Rs. {Number(r.amount).toFixed(2)}
                             </TableCell>
                             <TableCell>
                               <Badge

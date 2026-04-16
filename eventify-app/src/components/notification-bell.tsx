@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, Fragment } from "react"
 import { useRouter } from "next/navigation"
 import { Bell } from "lucide-react"
 import {
@@ -58,7 +58,12 @@ export function NotificationBell() {
     useEffect(() => {
         fetchNotifications()
         const interval = setInterval(fetchNotifications, 15000) // Poll every 15s
-        return () => clearInterval(interval)
+        const onRefresh = () => fetchNotifications()
+        window.addEventListener("refresh-notifications", onRefresh)
+        return () => {
+            clearInterval(interval)
+            window.removeEventListener("refresh-notifications", onRefresh)
+        }
     }, [fetchNotifications])
 
     const markAsRead = async (n: Notification) => {
@@ -95,6 +100,13 @@ export function NotificationBell() {
                 router.push("/my-events/payments")
             } else if (n.extra_data?.action === "open_events" && role === "organizer") {
                 router.push("/dashboard/open-events")
+            } else if ((n.extra_data?.action === "organizer_payment_followup" || n.extra_data?.category === "organizer_fee") && role === "organizer") {
+                router.push("/dashboard/payments?tab=organizer")
+            } else if (n.extra_data?.action === "vendor_payout_request" && role === "organizer") {
+                router.push("/dashboard/payments?tab=requests")
+            } else if (n.extra_data?.action === "vendor_work_verification" && role === "organizer") {
+                const vendorId = n.extra_data?.vendor_id
+                router.push(`/dashboard/vendors${vendorId ? `?vendorId=${vendorId}` : ""}`)
             } else if (n.extra_data?.event_id) {
                 if (role === "user") {
                     router.push("/my-events")
@@ -129,6 +141,54 @@ export function NotificationBell() {
 
     const unreadCount = notifications.filter(n => !n.is_read).length
 
+    const isOrganizerFeeNotification = (n: Notification) =>
+        n.extra_data?.action === "organizer_payment_followup" || n.extra_data?.category === "organizer_fee"
+
+    const byDateDesc = (a: Notification, b: Notification) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+
+    const organizerFeeNotifications = notifications.filter(isOrganizerFeeNotification).sort(byDateDesc)
+    const otherNotifications = notifications.filter(n => !isOrganizerFeeNotification(n)).sort(byDateDesc)
+    const orderedForDisplay = [...organizerFeeNotifications, ...otherNotifications].slice(0, 15)
+
+    const renderNotificationItem = (n: Notification) => (
+        <DropdownMenuItem
+            key={n.id}
+            onClick={() => markAsRead(n)}
+            className={cn(
+                "flex flex-col items-start gap-1 p-3 rounded-2xl cursor-pointer transition-all duration-200 border border-transparent",
+                !n.is_read ? "bg-indigo-50/40 border-indigo-50 hover:bg-indigo-50" : "opacity-70 hover:bg-slate-50"
+            )}
+        >
+            <div className="flex items-center justify-between w-full">
+                <span className={cn("text-xs tracking-tight", !n.is_read ? "font-black text-indigo-900" : "font-bold text-slate-700")}>
+                    {n.title}
+                </span>
+                {!n.is_read && <div className="w-2 h-2 bg-indigo-600 rounded-full shadow-sm shadow-indigo-200" />}
+            </div>
+            <p className="text-[11px] text-slate-500 leading-snug font-medium line-clamp-2">
+                {n.message}
+            </p>
+            <div className="flex items-center gap-2 mt-1.5 w-full justify-between">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                    {new Date(n.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                </span>
+                {isOrganizerFeeNotification(n) && (
+                    <span className="text-[9px] bg-violet-600 text-white px-1.5 py-0.5 rounded-md font-black uppercase">Organizer Fee</span>
+                )}
+                {n.type === "chat" && !isOrganizerFeeNotification(n) && (
+                    <span className="text-[9px] bg-white border border-slate-100 text-slate-400 px-1.5 py-0.5 rounded-md font-black uppercase">Message</span>
+                )}
+                {n.extra_data?.type === "booking" && !isOrganizerFeeNotification(n) && (
+                    <span className="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-md font-black uppercase">Booking</span>
+                )}
+                {n.type === "payment" && !isOrganizerFeeNotification(n) && (
+                    <span className="text-[9px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-md font-black uppercase">Payment</span>
+                )}
+            </div>
+        </DropdownMenuItem>
+    )
+
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -155,40 +215,30 @@ export function NotificationBell() {
 
                 <div className="max-h-[380px] overflow-y-auto space-y-1 scrollbar-hide">
                     {notifications.length > 0 ? (
-                        notifications.slice(0, 15).map((n) => (
-                            <DropdownMenuItem
-                                key={n.id}
-                                onClick={() => markAsRead(n)}
-                                className={cn(
-                                    "flex flex-col items-start gap-1 p-3 rounded-2xl cursor-pointer transition-all duration-200 border border-transparent",
-                                    !n.is_read ? "bg-indigo-50/40 border-indigo-50 hover:bg-indigo-50" : "opacity-70 hover:bg-slate-50"
-                                )}
-                            >
-                                <div className="flex items-center justify-between w-full">
-                                    <span className={cn("text-xs tracking-tight", !n.is_read ? "font-black text-indigo-900" : "font-bold text-slate-700")}>
-                                        {n.title}
-                                    </span>
-                                    {!n.is_read && <div className="w-2 h-2 bg-indigo-600 rounded-full shadow-sm shadow-indigo-200" />}
-                                </div>
-                                <p className="text-[11px] text-slate-500 leading-snug font-medium line-clamp-2">
-                                    {n.message}
-                                </p>
-                                <div className="flex items-center gap-2 mt-1.5 w-full justify-between">
-                                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
-                                        {new Date(n.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                    </span>
-                                    {n.type === "chat" && (
-                                        <span className="text-[9px] bg-white border border-slate-100 text-slate-400 px-1.5 py-0.5 rounded-md font-black uppercase">Message</span>
-                                    )}
-                                    {n.extra_data?.type === "booking" && (
-                                        <span className="text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-md font-black uppercase">Booking</span>
-                                    )}
-                                    {n.type === "payment" && (
-                                        <span className="text-[9px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-md font-black uppercase">Payment</span>
-                                    )}
-                                </div>
-                            </DropdownMenuItem>
-                        ))
+                        (() => {
+                            let prevGroup: "fee" | "other" | null = null
+                            return orderedForDisplay.map((n) => {
+                                const group: "fee" | "other" = isOrganizerFeeNotification(n) ? "fee" : "other"
+                                const showFeeHeader = group === "fee" && prevGroup !== "fee"
+                                const showOtherHeader = group === "other" && prevGroup === "fee"
+                                prevGroup = group
+                                return (
+                                    <Fragment key={n.id}>
+                                        {showFeeHeader && (
+                                            <p className="px-3 pt-2 pb-1 text-[10px] font-black uppercase tracking-widest text-violet-600">
+                                                Organizer Fee
+                                            </p>
+                                        )}
+                                        {showOtherHeader && organizerFeeNotifications.length > 0 && (
+                                            <p className="px-3 pt-2 pb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                Other
+                                            </p>
+                                        )}
+                                        {renderNotificationItem(n)}
+                                    </Fragment>
+                                )
+                            })
+                        })()
                     ) : (
                         <div className="py-12 flex flex-col items-center justify-center text-center px-4">
                             <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center mb-3">

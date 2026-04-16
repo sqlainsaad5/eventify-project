@@ -7,6 +7,8 @@ import requests
 import os
 from urllib.parse import urlencode
 from flask_mail import Message
+from itsdangerous import URLSafeTimedSerializer
+import re
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -19,6 +21,27 @@ GOOGLE_REDIRECT_URI = "http://localhost:5000/api/auth/google/callback"
 # Fixed admin credentials
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+
+PASSWORD_POLICY_REGEX = re.compile(r"^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+
+
+def is_strong_password(password: str) -> bool:
+    """Minimum 8 chars, at least one uppercase, one digit, one special char."""
+    return bool(PASSWORD_POLICY_REGEX.match(password or ""))
+
+
+def generate_password_reset_token(email: str) -> str:
+    serializer = URLSafeTimedSerializer(os.getenv("SECRET_KEY", "dev-secret"))
+    return serializer.dumps(email, salt="password-reset-salt")
+
+
+def verify_password_reset_token(token: str, expiration: int = 3600):
+    serializer = URLSafeTimedSerializer(os.getenv("SECRET_KEY", "dev-secret"))
+    try:
+        return serializer.loads(token, salt="password-reset-salt", max_age=expiration)
+    except Exception:
+        return None
 
 # -------------------------------
 # Google OAuth Routes
@@ -134,6 +157,11 @@ def signup():
     if not all([name, email, password]):
         return jsonify({"error": "All fields are required"}), 400
 
+    if not is_strong_password(password):
+        return jsonify({
+            "error": "Password must be at least 8 characters and include uppercase, number, and special character."
+        }), 400
+
     # Restrict roles that can be created via signup
     allowed_roles = {"user", "organizer", "vendor"}
     if role not in allowed_roles:
@@ -160,6 +188,57 @@ def signup():
     return jsonify({
         "message": "Signup successful! Please check your email for verification.",
     }), 201
+
+
+@auth_bp.route("/forgot-password", methods=["POST"])
+def forgot_password():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if user:
+        token = generate_password_reset_token(user.email)
+        reset_url = f"http://localhost:3000/reset-password?token={token}"
+        msg = Message("Reset your Eventify password", recipients=[user.email])
+        msg.body = (
+            f"Hi {user.name or 'there'},\n\n"
+            f"Use the link below to reset your password:\n{reset_url}\n\n"
+            "This link expires in 1 hour."
+        )
+        mail.send(msg)
+
+    # Always return success to avoid exposing registered emails.
+    return jsonify({"message": "If this email exists, a password reset link has been sent."}), 200
+
+
+@auth_bp.route("/reset-password", methods=["POST"])
+def reset_password():
+    data = request.get_json() or {}
+    token = (data.get("token") or "").strip()
+    password = data.get("password") or ""
+
+    if not token or not password:
+        return jsonify({"error": "Token and new password are required"}), 400
+
+    if not is_strong_password(password):
+        return jsonify({
+            "error": "Password must be at least 8 characters and include uppercase, number, and special character."
+        }), 400
+
+    email = verify_password_reset_token(token)
+    if not email:
+        return jsonify({"error": "Invalid or expired reset token"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user.set_password(password)
+    db.session.commit()
+
+    return jsonify({"message": "Password reset successful. Please log in."}), 200
 
 @auth_bp.route("/verify-email/<token>", methods=["GET"])
 def verify_email(token):

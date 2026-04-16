@@ -167,7 +167,7 @@ export default function VendorAnalyticsPage() {
           />
           <SummaryCard
             title="Est. Earnings"
-            value={`$${estimatedEarnings.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            value={`Rs. ${estimatedEarnings.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
             sub="From completed events"
             icon={<DollarSign className="h-5 w-5 text-amber-600" />}
             bg="bg-amber-50"
@@ -288,7 +288,7 @@ export default function VendorAnalyticsPage() {
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-bold text-purple-600">
-                        ${service.basePrice?.toLocaleString()}
+                        Rs. {service.basePrice?.toLocaleString()}
                       </p>
                       <Badge
                         className={`border-none text-[10px] font-bold ${service.isActive

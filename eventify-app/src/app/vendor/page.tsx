@@ -221,7 +221,7 @@ export default function VendorDashboard() {
                           </p>
                           <p className="text-xs text-slate-500 flex items-center gap-1">
                             <DollarSign className="h-3 w-3" />
-                            ${event.budget?.toLocaleString()}
+                            Rs. {event.budget?.toLocaleString()}
                           </p>
                         </div>
                       </div>

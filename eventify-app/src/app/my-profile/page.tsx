@@ -63,6 +63,8 @@ export default function MyProfilePage() {
             if (response.ok) {
                 const data = await response.json()
                 setUserData(data.user)
+                localStorage.setItem("user", JSON.stringify(data.user))
+                window.dispatchEvent(new Event("user-profile-updated"))
             }
         } catch (error) {
             console.error("Profile fetch error:", error)
@@ -95,6 +97,8 @@ export default function MyProfilePage() {
                 if (response.ok) {
                     const data = await response.json()
                     setUserData(data.user)
+                    localStorage.setItem("user", JSON.stringify(data.user))
+                    window.dispatchEvent(new Event("user-profile-updated"))
                     toast.success("Profile photo updated!")
                 }
             } catch (error) {
@@ -126,6 +130,8 @@ export default function MyProfilePage() {
             if (response.ok) {
                 const data = await response.json()
                 setUserData(data.user)
+                localStorage.setItem("user", JSON.stringify(data.user))
+                window.dispatchEvent(new Event("user-profile-updated"))
                 setIsEditing(false)
                 toast.success("Profile details synchronized!")
             }

@@ -1,7 +1,7 @@
 "use client"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -79,8 +79,17 @@ interface OrganizerPaymentRequest {
   paid_at: string | null
 }
 
+interface AppNotification {
+  id: number
+  is_read: boolean
+  extra_data?: {
+    action?: string
+  }
+}
+
 export default function PaymentsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [payments, setPayments] = useState<Payment[]>([])
   const [events, setEvents] = useState<Event[]>([])
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([])
@@ -95,6 +104,7 @@ export default function PaymentsPage() {
   const [organizerForm, setOrganizerForm] = useState({ event_id: "", amount: "", description: "Coordination fee" })
   const [organizerSubmitting, setOrganizerSubmitting] = useState(false)
   const [completingEventId, setCompletingEventId] = useState<number | null>(null)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
   const getUserId = (): number | null => {
@@ -126,11 +136,12 @@ export default function PaymentsPage() {
 
     try {
       setLoading(true)
-      const [eventsRes, paymentsRes, requestsRes, orgRequestsRes] = await Promise.all([
+      const [eventsRes, paymentsRes, requestsRes, orgRequestsRes, notificationsRes] = await Promise.all([
         fetch("http://localhost:5000/api/payments/events-with-payment-status", { headers: { "Authorization": `Bearer ${token}` } }),
         fetch("http://localhost:5000/api/payments", { headers: { "Authorization": `Bearer ${token}` } }),
         fetch("http://localhost:5000/api/payments/requests", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:5000/api/payments/organizer-requests", { headers: { "Authorization": `Bearer ${token}` } })
+        fetch("http://localhost:5000/api/payments/organizer-requests", { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch("http://localhost:5000/api/payments/notifications", { headers: { "Authorization": `Bearer ${token}` } })
       ])
 
       if (eventsRes.ok) setEvents(await eventsRes.json())
@@ -146,6 +157,10 @@ export default function PaymentsPage() {
         const d = await orgRequestsRes.json()
         setOrganizerRequests(d.organizer_requests || [])
       }
+      if (notificationsRes.ok) {
+        const d = await notificationsRes.json()
+        setNotifications(d.notifications || [])
+      }
     } catch (err) {
       console.error(err)
     } finally {
@@ -154,6 +169,43 @@ export default function PaymentsPage() {
   }
 
   useEffect(() => { loadData() }, [])
+
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab === "organizer" || tab === "payments" || tab === "requests") {
+      setActiveTab(tab)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    if (activeTab !== "organizer") return
+    const token = getToken()
+    if (!token) return
+    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "organizer_payment_followup" }),
+    })
+      .then(() => {
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("refresh-notifications"))
+      })
+      .catch(() => {})
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab !== "requests") return
+    const token = getToken()
+    if (!token) return
+    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "vendor_payout_request" }),
+    })
+      .then(() => {
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("refresh-notifications"))
+      })
+      .catch(() => {})
+  }, [activeTab])
 
   const handleCreatePayment = async (eventId: number, amount: number, requestId?: number, organizerRequestId?: number) => {
     const token = getToken()
@@ -315,7 +367,7 @@ export default function PaymentsPage() {
     loadData()
   }
 
-  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
+  const formatCurrency = (amount: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR" }).format(amount)
 
   const getPaymentStatusBadge = (status: string) => {
     const styles = {
@@ -359,6 +411,16 @@ export default function PaymentsPage() {
     )
   }
 
+  const vendorPayoutActionCount = notifications.filter(
+    (n) => !n.is_read && n.extra_data?.action === "vendor_payout_request"
+  ).length
+
+  const organizerFeeActionCount = notifications.filter(
+    (n) =>
+      !n.is_read &&
+      (n.extra_data?.action === "organizer_payment_followup" || n.extra_data?.category === "organizer_fee")
+  ).length
+
   if (loading) return (
     <DashboardLayout>
       <div className="flex flex-col items-center justify-center min-h-[70vh] gap-4">
@@ -373,8 +435,8 @@ export default function PaymentsPage() {
       <div className="space-y-8 p-1">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tighter">Payments Hub</h1>
-            <p className="text-slate-500 font-medium">Verified by Stripe Infrastructure</p>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tighter">Payment Workflow</h1>
+            <p className="text-slate-500 font-medium">25% advance, completion, and 75% final settlement</p>
           </div>
           <div className="bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-600" />
@@ -383,10 +445,50 @@ export default function PaymentsPage() {
         </div>
 
         <div className="flex gap-2 bg-white p-2 rounded-[24px] border border-slate-100 max-w-md">
-          <button onClick={() => setActiveTab("payments")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "payments" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Projects</button>
-          <button onClick={() => setActiveTab("requests")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "requests" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Vendor</button>
-          <button onClick={() => setActiveTab("organizer")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "organizer" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Organizer</button>
+          <button onClick={() => setActiveTab("payments")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "payments" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Event Funding</button>
+          <button onClick={() => setActiveTab("requests")} className={`relative flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "requests" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>
+            Vendor Payouts
+            {vendorPayoutActionCount > 0 && (
+              <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-black flex items-center justify-center ${activeTab === "requests" ? "bg-white text-slate-900" : "bg-amber-500 text-white"}`}>
+                {vendorPayoutActionCount}
+              </span>
+            )}
+          </button>
+          <button onClick={() => setActiveTab("organizer")} className={`relative flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "organizer" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>
+            Organizer Fees
+            {organizerFeeActionCount > 0 && (
+              <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-black flex items-center justify-center ${activeTab === "organizer" ? "bg-white text-slate-900" : "bg-violet-600 text-white"}`}>
+                {organizerFeeActionCount}
+              </span>
+            )}
+          </button>
         </div>
+
+        <Card className="rounded-[24px] border-slate-100 shadow-sm">
+          <div className="p-4 sm:p-5">
+            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-3">
+              Organizer Payment Flow
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Step 1</p>
+                <p className="text-xs font-bold text-slate-800">Pay 25% advance</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Step 2</p>
+                <p className="text-xs font-bold text-slate-800">Work completed</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Step 3</p>
+                <p className="text-xs font-bold text-slate-800">Request 75% final</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Step 4</p>
+                <p className="text-xs font-bold text-slate-800">Client pays 75%</p>
+              </div>
+            </div>
+          </div>
+        </Card>
 
         {activeTab === "payments" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -425,11 +527,11 @@ export default function PaymentsPage() {
                   {event.payment_status === "unpaid" ? (
                     <Button onClick={() => handleCreatePayment(event.id, event.budget * 0.25)} className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black uppercase text-[10px] tracking-widest">
                       {processing === event.id ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <CreditCard className="w-4 h-4 mr-2" />}
-                      Pay Stripe Deposit
+                      Pay 25% Advance
                     </Button>
                   ) : (
                     <div className="bg-emerald-50 text-emerald-600 p-4 rounded-2xl flex items-center justify-center gap-2 border border-emerald-100 italic font-bold text-sm">
-                      <CheckCircle className="h-4 w-4" /> Deposit Active
+                      <CheckCircle className="h-4 w-4" /> 25% Advance Paid
                     </div>
                   )}
                 </div>
@@ -439,9 +541,19 @@ export default function PaymentsPage() {
         )}
         {activeTab === "requests" && (
           <div className="space-y-4">
+            {vendorPayoutActionCount > 0 && (
+              <Card className="p-4 rounded-2xl border-amber-200 bg-amber-50/70">
+                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                  Action required
+                </p>
+                <p className="text-sm font-semibold text-amber-900 mt-1">
+                  You have {vendorPayoutActionCount} new vendor payout request{vendorPayoutActionCount > 1 ? "s" : ""} to review.
+                </p>
+              </Card>
+            )}
             {paymentRequests.length === 0 ? (
               <div className="text-center p-20 bg-slate-50 rounded-[40px] border-dashed border-2 border-slate-200">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No pending settlements</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No pending vendor payouts</p>
               </div>
             ) : (
               paymentRequests.map(req => (
@@ -523,10 +635,18 @@ export default function PaymentsPage() {
                       {advancePaidEvents.length > 0 && (
                         <Card className="p-6 rounded-[32px] border-slate-100 bg-emerald-50/40">
                           <h3 className="text-xs font-black text-emerald-700 uppercase tracking-[0.3em] mb-4">
-                            25% Paid — Work In Progress
+                                    25% Advance Paid - Work In Progress
                           </h3>
                           <div className="grid gap-3">
                             {advancePaidEvents.map((e: any) => (
+                              (() => {
+                                const finalReq = findFinalRequestForEvent(e.id)
+                                const canRequestFinal =
+                                  e.status === "completed" &&
+                                  (!finalReq || finalReq.status === "rejected")
+                                const hasPendingFinalReq = finalReq?.status === "pending"
+                                const hasRejectedFinalReq = finalReq?.status === "rejected"
+                                return (
                               <div
                                 key={e.id}
                                 className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-emerald-100"
@@ -536,11 +656,21 @@ export default function PaymentsPage() {
                                     {e.name}
                                   </p>
                                   <p className="text-xs text-slate-500">
-                                    25% advance has been paid. Continue working and mark the event as completed when done.
+                                    25% advance has been paid. Complete the event, then request the remaining 75%.
                                   </p>
                                   {e.status !== "completed" && (
                                     <p className="text-[10px] text-amber-600 font-semibold mt-1">
-                                      Please complete work to request 75% payment.
+                                      Complete the event to unlock the 75% final request.
+                                    </p>
+                                  )}
+                                  {hasPendingFinalReq && (
+                                    <p className="text-[10px] text-amber-600 font-semibold mt-1">
+                                      75% request already sent. Waiting for client payment.
+                                    </p>
+                                  )}
+                                  {hasRejectedFinalReq && (
+                                    <p className="text-[10px] text-red-600 font-semibold mt-1">
+                                      Previous 75% request was rejected. You can send it again.
                                     </p>
                                   )}
                                 </div>
@@ -551,7 +681,7 @@ export default function PaymentsPage() {
                                   <Badge variant="outline" className="border-slate-200 text-slate-600 text-[9px] font-bold uppercase">
                                     75% Payment Pending
                                   </Badge>
-                                  {e.status === "completed" && !e.organizer_final_requested ? (
+                                  {canRequestFinal ? (
                                     <Button
                                       size="sm"
                                       onClick={async () => {
@@ -582,7 +712,7 @@ export default function PaymentsPage() {
                                       }}
                                       className="h-9 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest"
                                     >
-                                      Request 75% Payment
+                                      {hasRejectedFinalReq ? "Resend Remaining 75%" : "Request Remaining 75%"}
                                     </Button>
                                   ) : e.status !== "completed" ? (
                                     <Button
@@ -602,8 +732,16 @@ export default function PaymentsPage() {
                                           )
                                           const data = await res.json().catch(() => ({}))
                                           if (res.ok) {
-                                            toast.success("Event marked as completed. You can now request the 75% payment.")
+                                            toast.success("Event marked as completed.")
+                                            toast("Next step required", {
+                                              description: "Go to Organizer Fees and request the remaining 75% payment from the client.",
+                                              action: {
+                                                label: "Open Organizer Fees",
+                                                onClick: () => setActiveTab("organizer"),
+                                              },
+                                            })
                                             loadData()
+                                            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("refresh-notifications"))
                                           } else {
                                             toast.error(data.error || "Failed to mark event as completed")
                                           }
@@ -622,16 +760,17 @@ export default function PaymentsPage() {
                                           Completing...
                                         </>
                                       ) : (
-                                        "Mark event as completed"
+                                        "Mark Event Completed"
                                       )}
                                     </Button>
                                   ) : (
                                     <p className="text-[10px] text-slate-400 font-semibold">
-                                      Final payment already requested.
+                                      75% final request already sent.
                                     </p>
                                   )}
                                 </div>
                               </div>
+                            )})()
                             ))}
                           </div>
                         </Card>
@@ -640,7 +779,7 @@ export default function PaymentsPage() {
                       {pendingFinalEvents.length > 0 && (
                         <Card className="p-6 rounded-[32px] border-slate-100 bg-amber-50/60">
                           <h3 className="text-xs font-black text-amber-700 uppercase tracking-[0.3em] mb-4">
-                            75% Payment Requested — Awaiting User
+                            75% Final Requested - Awaiting Client Payment
                           </h3>
                           <div className="space-y-3">
                             {pendingFinalEvents.map((e: any) => {
@@ -671,7 +810,7 @@ export default function PaymentsPage() {
                                       75% Requested
                                     </Badge>
                                     <Badge variant="outline" className="border-amber-200 text-amber-700 text-[9px] font-bold uppercase">
-                                      Awaiting User Payment
+                                      Awaiting Client Payment
                                     </Badge>
                                   </div>
                                 </div>
@@ -724,7 +863,7 @@ export default function PaymentsPage() {
 
                   {pendingForMe.length > 0 && (
                     <Card className="p-6 rounded-[32px] border-slate-100">
-                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Requests from organizer (pay now)</h3>
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Organizer Fee Requests (Pay Now)</h3>
                       <div className="space-y-4">
                         {pendingForMe.map((r) => (
                           <div key={r.id} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">

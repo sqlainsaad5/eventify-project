@@ -241,7 +241,7 @@ class Payment(db.Model):
     vendor_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     payment_type = db.Column(db.String(20), nullable=True)  # advance, final, or null for non-vendor
     amount = db.Column(db.Float, nullable=False)
-    currency = db.Column(db.String(10), default='USD')
+    currency = db.Column(db.String(10), default='PKR')
     status = db.Column(db.String(30), default='pending')  # Increased length
     payment_method = db.Column(db.String(50), default='card')
     transaction_id = db.Column(db.String(100))
@@ -317,7 +317,7 @@ class OrganizerPaymentRequest(db.Model):
     event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
     organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     amount = db.Column(db.Float, nullable=False)
-    currency = db.Column(db.String(10), default="USD")
+    currency = db.Column(db.String(10), default="PKR")
     description = db.Column(db.Text)
     status = db.Column(db.String(20), default="pending")  # pending, paid, rejected
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())

@@ -54,6 +54,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<any[]>([])
   const [unreadChatCount, setUnreadChatCount] = useState(0)
   const [openEventsCount, setOpenEventsCount] = useState(0)
+  const [pendingVerificationCount, setPendingVerificationCount] = useState(0)
 
   useEffect(() => {
     // 1. Get User Data and Role Security
@@ -88,21 +89,36 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     fetchNotifications()
     fetchUnreadChatCount()
     fetchOpenEventsCount()
+    fetchPendingVerificationCount()
 
     // 4. Set Polling Interval
     const interval = setInterval(() => {
       fetchNotifications()
       fetchUnreadChatCount()
       fetchOpenEventsCount()
+      fetchPendingVerificationCount()
     }, 30000)
 
     const onRefreshNotifications = () => {
       fetchNotifications()
     }
+    const onProfileUpdated = () => {
+      const savedUser = localStorage.getItem("user")
+      if (savedUser) {
+        try {
+          setUserData(JSON.parse(savedUser))
+        } catch (e) {
+          console.error("Failed to parse updated user")
+        }
+      }
+      refreshUserData()
+    }
     window.addEventListener("refresh-notifications", onRefreshNotifications)
+    window.addEventListener("user-profile-updated", onProfileUpdated)
     return () => {
       clearInterval(interval)
       window.removeEventListener("refresh-notifications", onRefreshNotifications)
+      window.removeEventListener("user-profile-updated", onProfileUpdated)
     }
   }, [])
 
@@ -147,6 +163,38 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       }
     } catch (err) {
       setOpenEventsCount(0)
+    }
+  }
+
+  const fetchPendingVerificationCount = async () => {
+    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+    const role = localStorage.getItem("role")
+    if (!token || role !== "organizer") {
+      setPendingVerificationCount(0)
+      return
+    }
+    try {
+      const res = await fetch("http://localhost:5000/api/vendors", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        setPendingVerificationCount(0)
+        return
+      }
+      const vendors = await res.json()
+      if (!Array.isArray(vendors)) {
+        setPendingVerificationCount(0)
+        return
+      }
+      const count = vendors.reduce((acc: number, vendor: any) => {
+        const pending = Array.isArray(vendor?.assigned_events)
+          ? vendor.assigned_events.filter((ev: any) => ev?.completed && !ev?.verified).length
+          : 0
+        return acc + pending
+      }, 0)
+      setPendingVerificationCount(count)
+    } catch {
+      setPendingVerificationCount(0)
     }
   }
 
@@ -333,14 +381,31 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                       {openEventsCount}
                     </span>
                   )}
-                  {item.label === "Browse Vendors" && unreadChatCount > 0 && (
-                    <span className={cn(
-                      "ml-auto flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",
-                      isActive ? "bg-purple-600 text-white" : "bg-red-500 text-white"
-                    )}>
-                      {unreadChatCount}
-                    </span>
-                  )}
+                  {item.label === "Browse Vendors" && (() => {
+                    const totalCount = unreadChatCount + pendingVerificationCount
+                    return totalCount > 0 ? (
+                      <span className={cn(
+                        "ml-auto flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",
+                        isActive ? "bg-purple-600 text-white" : "bg-red-500 text-white"
+                      )}>
+                        {totalCount}
+                      </span>
+                    ) : null
+                  })()}
+                  {item.label === "Payments" && (() => {
+                    const count = notifications.filter((n: any) =>
+                      !n.is_read &&
+                      (n.extra_data?.action === "organizer_payment_followup" || n.extra_data?.action === "vendor_payout_request")
+                    ).length
+                    return count > 0 ? (
+                      <span className={cn(
+                        "ml-auto flex min-w-[20px] h-5 px-1.5 items-center justify-center rounded-full text-[10px] font-bold",
+                        isActive ? "bg-purple-600 text-white" : "bg-amber-500 text-white"
+                      )}>
+                        {count}
+                      </span>
+                    ) : null
+                  })()}
                 </Link>
               )
             })}

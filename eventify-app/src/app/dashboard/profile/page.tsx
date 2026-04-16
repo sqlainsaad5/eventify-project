@@ -57,6 +57,8 @@ export default function OrganizerProfilePage() {
       if (response.ok) {
         const data = await response.json()
         setUserData(data.user)
+        localStorage.setItem("user", JSON.stringify(data.user))
+        window.dispatchEvent(new Event("user-profile-updated"))
       } else {
         console.error("Failed to fetch user profile")
       }
@@ -100,6 +102,8 @@ export default function OrganizerProfilePage() {
         if (response.ok) {
           const data = await response.json()
           setUserData(data.user)
+          localStorage.setItem("user", JSON.stringify(data.user))
+          window.dispatchEvent(new Event("user-profile-updated"))
           alert("Profile image updated successfully!")
         } else {
           const errorData = await response.json()
@@ -132,6 +136,8 @@ export default function OrganizerProfilePage() {
       if (response.ok) {
         const data = await response.json()
         setUserData(data.user)
+        localStorage.setItem("user", JSON.stringify(data.user))
+        window.dispatchEvent(new Event("user-profile-updated"))
         alert("Profile image removed successfully!")
       } else {
         alert("Failed to remove image")
@@ -164,6 +170,8 @@ export default function OrganizerProfilePage() {
       if (response.ok) {
         const data = await response.json()
         setUserData(data.user)
+        localStorage.setItem("user", JSON.stringify(data.user))
+        window.dispatchEvent(new Event("user-profile-updated"))
         setIsEditing(false)
         alert("Profile updated successfully!")
       } else {

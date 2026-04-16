@@ -62,7 +62,7 @@ const CheckoutForm = ({ amount, onSuccess }: CheckoutFormProps) => {
                     <CreditCard className="h-4 w-4" />
                 </div>
                 <div className="text-2xl font-black text-slate-900">
-                    ${amount.toLocaleString()}
+                    Rs. {amount.toLocaleString()}
                 </div>
             </div>
 
@@ -119,7 +119,7 @@ export const StripeCheckoutModal = ({
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-md rounded-[40px] border-none shadow-2xl p-8 bg-white">
+            <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto rounded-[40px] border-none shadow-2xl p-8 bg-white">
                 <DialogHeader>
                     <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight">
                         Checkout Portal

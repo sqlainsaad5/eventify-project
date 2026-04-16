@@ -124,3 +124,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Edge/IE: built-in password reveal (often only while focused) — we use a custom toggle instead */
+.hide-native-password-reveal::-ms-reveal {
+  display: none;
+}

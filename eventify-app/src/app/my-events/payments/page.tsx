@@ -35,19 +35,30 @@ interface PaymentRecord {
 }
 
 const formatCurrency = (amount: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount)
+  new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR" }).format(amount)
 
 const organizerAdvanceLabel = (status: OrganizerPaymentRequest["status"]) => {
   switch (status) {
     case "pending":
-      return "25% advance requested"
+      return "Advance 25% requested"
     case "paid":
-      return "25% advance paid"
+      return "Advance 25% paid"
     case "rejected":
-      return "25% advance rejected"
+      return "Advance 25% rejected"
     default:
       return status
   }
+}
+
+const requestPhaseLabel = (request: OrganizerPaymentRequest) => {
+  const description = (request.description || "").toLowerCase()
+  if (description.includes("75%") || description.includes("final")) {
+    return "Final 75%"
+  }
+  if (description.includes("25%") || description.includes("advance")) {
+    return "Advance 25%"
+  }
+  return "Organizer Fee"
 }
 
 export default function MyEventsPaymentsPage() {
@@ -237,15 +248,25 @@ export default function MyEventsPaymentsPage() {
       >
         <div className="relative z-10 container mx-auto px-6">
           <h1 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
-            Payments
+            Organizer Payments
           </h1>
           <p className="text-lg text-white/70 font-medium max-w-xl mx-auto">
-            Pay or reject payment requests from your event organizers.
+            Review and settle organizer fee requests (Advance 25% and Final 75%).
           </p>
         </div>
       </div>
 
       <main className="container mx-auto px-6 py-12 max-w-4xl">
+        <Card className="p-5 rounded-[24px] border-slate-100 mb-6 bg-white">
+          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.22em] mb-3">
+            How Organizer Payments Work
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-semibold text-slate-700">
+            <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Advance 25%: Requested first to start work</div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Final 75%: Requested after event completion</div>
+          </div>
+        </Card>
+
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
@@ -257,7 +278,7 @@ export default function MyEventsPaymentsPage() {
           <Card className="p-6 rounded-[32px] border-slate-100">
             <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
               <DollarSign className="h-4 w-4" />
-              Requests from organizer (pay now)
+              Organizer Fee Requests (Pay Now)
             </h3>
             <div className="space-y-4">
               {pendingRequests.map((r) => (
@@ -271,9 +292,14 @@ export default function MyEventsPaymentsPage() {
                     </p>
                     <p className="font-bold text-slate-900">{r.organizer_name}</p>
                     <p className="text-sm text-slate-500">{r.description}</p>
-                    <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                      {organizerAdvanceLabel(r.status)}
-                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-indigo-100 text-indigo-700 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest">
+                        {requestPhaseLabel(r)}
+                      </span>
+                      <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest">
+                        {organizerAdvanceLabel(r.status)}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xl font-black text-slate-900">
@@ -289,7 +315,7 @@ export default function MyEventsPaymentsPage() {
                       {processing === r.id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        "Pay"
+                        "Pay Now"
                       )}
                     </Button>
                     <Button
@@ -312,7 +338,7 @@ export default function MyEventsPaymentsPage() {
               No pending organizer payment requests
             </p>
             <p className="text-sm text-slate-500 mt-2">
-              When your organizer requests payment, it will appear here.
+              Advance 25% and Final 75% requests from your organizer will appear here.
             </p>
             <Link href="/my-events">
               <Button
@@ -328,7 +354,7 @@ export default function MyEventsPaymentsPage() {
         <Card className="p-6 rounded-[32px] border-slate-100 mt-8">
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
             <History className="h-4 w-4" />
-            Payment history
+            Organizer Payment History
           </h3>
           <div className="space-y-3">
             {payments.length === 0 ? (
@@ -347,9 +373,13 @@ export default function MyEventsPaymentsPage() {
                       <p className="text-[10px] font-black text-slate-900 uppercase tracking-tighter">
                         {p.event_name}
                       </p>
-                      {p.payment_type === "organizer" && (
+                      {(p.payment_type === "organizer" || p.payment_type === "organizer_advance" || p.payment_type === "organizer_final") && (
                         <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
-                          Payment to organizer
+                          {p.payment_type === "organizer_final"
+                            ? "Organizer final 75% paid"
+                            : p.payment_type === "organizer_advance"
+                              ? "Organizer advance 25% paid"
+                              : "Payment to organizer"}
                         </p>
                       )}
                     </div>

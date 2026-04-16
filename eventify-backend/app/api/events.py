@@ -855,6 +855,24 @@ def complete_event(event_id):
 
         db.session.commit()
 
+        # If organizer completed work after 25% payment, prompt next 75% request step via notification
+        try:
+            if event.organizer_id and int(user_id) == int(event.organizer_id) and getattr(event, "organizer_advance_paid", False) and not getattr(event, "organizer_final_paid", False):
+                from app.api.payments import create_notification
+                create_notification(
+                    int(event.organizer_id),
+                    "Action required: request remaining 75%",
+                    f"'{event.name}' is completed. Open Payments > Organizer Fees to request the remaining 75% from the client.",
+                    "payment",
+                    {
+                        "event_id": event.id,
+                        "action": "organizer_payment_followup",
+                        "category": "organizer_fee",
+                    },
+                )
+        except Exception as notify_err:
+            print(f"Complete event follow-up notification failed: {notify_err}")
+
         return jsonify({"message": "Event marked as completed", "event": event.to_dict()}), 200
 
     except Exception as e:

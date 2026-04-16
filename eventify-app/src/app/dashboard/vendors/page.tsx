@@ -139,7 +139,7 @@ function VendorsPageContent() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [filtered, setFiltered] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [events, setEvents] = useState<{ id: number; name: string }[]>([]);
@@ -470,8 +470,16 @@ function VendorsPageContent() {
 
   useEffect(() => {
     let filteredData = vendors;
-    if (category !== "All") {
-      filteredData = filteredData.filter((v) => v.category === category);
+    if (category !== "all") {
+      const selectedCategory = category.trim().toLowerCase();
+      filteredData = filteredData.filter((v) => {
+        const vendorCategory = (v.category || "").trim().toLowerCase();
+        return (
+          vendorCategory === selectedCategory ||
+          vendorCategory.includes(selectedCategory) ||
+          selectedCategory.includes(vendorCategory)
+        );
+      });
     }
     if (debouncedSearch.trim()) {
       filteredData = filteredData.filter((v) =>
@@ -567,7 +575,7 @@ function VendorsPageContent() {
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
               <SelectContent className="rounded-2xl border-slate-100 shadow-xl">
-                <SelectItem value="All">All Specialties</SelectItem>
+                <SelectItem value="all">All Specialist</SelectItem>
                 {["Wedding", "Conference", "Corporate", "Workshop", "Birthday", "Concert"].map(cat => (
                   <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                 ))}

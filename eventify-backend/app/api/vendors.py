@@ -336,15 +336,16 @@ def mark_event_completed(event_id):
         vendor.completed_events.append(event)
         db.session.commit()
         
-        # Notify Organizer
+        # Notify organizer (fallback to event owner when no organizer is assigned)
         try:
             from app.api.payments import create_notification
+            notify_user_id = event.organizer_id if event.organizer_id is not None else event.user_id
             create_notification(
-                event.user_id,
+                notify_user_id,
                 "✅ Event Task Completed",
                 f"Vendor '{vendor.name}' has marked their work for '{event.name}' as completed.",
                 "success",
-                {"event_id": event.id, "vendor_id": vendor.id}
+                {"event_id": event.id, "vendor_id": vendor.id, "action": "vendor_work_verification"}
             )
         except Exception as e:
             print(f"Completion notification failed: {e}")

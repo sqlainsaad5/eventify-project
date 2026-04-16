@@ -518,8 +518,16 @@ export default function AllEventsPage() {
                                         )
                                         const data = await res.json().catch(() => ({}))
                                         if (res.ok) {
-                                          toast.success("Event marked as completed")
+                                          toast.success("Event marked as completed.")
+                                          toast("Next step required", {
+                                            description: "Open Payments > Organizer Fees and request the remaining 75% payment from the client.",
+                                            action: {
+                                              label: "Open Organizer Fees",
+                                              onClick: () => router.push("/dashboard/payments?tab=organizer"),
+                                            },
+                                          })
                                           fetchEvents()
+                                          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("refresh-notifications"))
                                         } else {
                                           toast.error(data.error || "Failed to mark event as completed")
                                         }
@@ -608,7 +616,7 @@ export default function AllEventsPage() {
                         </Badge>
                       </td>
                       <td className="px-6 py-5">
-                        <span className="font-black text-slate-900">${event.budget.toLocaleString()}</span>
+                        <span className="font-black text-slate-900">Rs. {event.budget.toLocaleString()}</span>
                       </td>
                       <td className="px-6 py-5">
                         <div className="w-40 space-y-1.5">

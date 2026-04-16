@@ -196,10 +196,11 @@ def create_payment_intent():
             if event.user_id != current_user_id:
                 return jsonify({"error": "Event not found"}), 404
 
+        stripe_currency = "pkr"
         payment = Payment(
             event_id=event_id,
             amount=float(amount),
-            currency="USD",
+            currency=stripe_currency.upper(),
             status="pending",
             payment_method="card",
             payment_type=None,
@@ -217,11 +218,23 @@ def create_payment_intent():
         if organizer_request_id:
             meta["organizer_request_id"] = str(organizer_request_id)
 
-        intent = stripe.PaymentIntent.create(
-            amount=int(float(amount) * 100),
-            currency="usd",
-            metadata=meta
-        )
+        try:
+            intent = stripe.PaymentIntent.create(
+                amount=int(float(amount) * 100),
+                currency=stripe_currency,
+                metadata=meta
+            )
+        except Exception as stripe_err:
+            # Fallback for Stripe accounts that are not enabled for PKR
+            print(f"⚠️ PKR payment intent failed, retrying with USD: {stripe_err}")
+            stripe_currency = "usd"
+            payment.currency = stripe_currency.upper()
+            db.session.commit()
+            intent = stripe.PaymentIntent.create(
+                amount=int(float(amount) * 100),
+                currency=stripe_currency,
+                metadata=meta
+            )
         print(f"🔌 Stripe Intent Created: {intent.id}")
         return jsonify({"clientSecret": intent.client_secret, "payment_id": payment.id}), 201
     except Exception as e:
@@ -352,9 +365,9 @@ def request_payment():
     create_notification(
         notify_id,
         "Payment Request",
-        f"Vendor has requested ${data['amount']} for '{event.name}'.",
+        f"Vendor has requested Rs. {float(data['amount']):,.2f} for '{event.name}'.",
         "payment",
-        {"request_id": pr.id, "event_id": event.id}
+        {"request_id": pr.id, "event_id": event.id, "action": "vendor_payout_request"}
     )
 
     return jsonify({"message": "Request submitted"}), 201
@@ -553,7 +566,7 @@ def create_organizer_payment_request():
     create_notification(
         event.user_id,
         "Payment request from organizer",
-        f"Organizer has requested {amount:.2f} USD for '{event.name}'.",
+        f"Organizer has requested Rs. {amount:,.2f} for '{event.name}'.",
         "payment",
         {"organizer_request_id": opr.id, "event_id": event_id},
     )

@@ -174,7 +174,7 @@ export default function OpenEventsPage() {
                   </div>
                   <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
                     <DollarSign className="h-4 w-4 text-indigo-500" />
-                    <span>${Number(event.budget).toLocaleString()} budget</span>
+                    <span>Rs. {Number(event.budget).toLocaleString()} budget</span>
                   </div>
                   <Button
                     onClick={() => openApplyModal(event.id)}

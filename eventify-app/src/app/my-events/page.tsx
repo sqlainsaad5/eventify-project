@@ -180,9 +180,9 @@ export default function MyEventsPage() {
             case "awaiting_organizer_confirmation":
                 return "Awaiting Organizer Confirmation"
             case "pending_advance_payment":
-                return "Pending Advance Payment"
+                return "Awaiting 25% Advance Payment"
             case "advance_payment_completed":
-                return "25% Payment Completed"
+                return "25% Advance Paid"
             case "vendor_assigned":
                 return "Vendor Assigned"
             case "completed":
@@ -196,11 +196,11 @@ export default function MyEventsPage() {
     const organizerAdvanceLabel = (status?: string) => {
         switch (status) {
             case "pending":
-                return "25% advance requested"
+                return "Advance 25% requested"
             case "paid":
-                return "25% advance paid"
+                return "Advance 25% paid"
             case "rejected":
-                return "25% advance rejected"
+                return "Advance 25% rejected"
             default:
                 return status || ""
         }
@@ -271,7 +271,7 @@ export default function MyEventsPage() {
                         <Link href="/event-details">
                             <Button className="rounded-2xl font-black uppercase tracking-widest text-[10px] gap-2 bg-indigo-600 hover:bg-indigo-700">
                                 <Plus className="h-4 w-4" />
-                                Create Event
+                                New
                             </Button>
                         </Link>
                     </div>

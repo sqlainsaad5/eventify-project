@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
   Sparkles,
-  Zap,
   ArrowRight,
   CheckCircle,
   Layout,
@@ -35,7 +34,7 @@ import { AIAssistantPanel } from "@/components/ai-assistant-panel"
 
 export default function HomePage() {
   const router = useRouter()
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null)
+  const [user, setUser] = useState<{ name: string; email: string; profile_image?: string } | null>(null)
   const [role, setRole] = useState<string | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [showAssistant, setShowAssistant] = useState(false)
@@ -49,6 +48,26 @@ export default function HomePage() {
       if (storedUser) setUser(JSON.parse(storedUser))
       if (storedRole) setRole(storedRole)
     } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    const syncUserFromStorage = () => {
+      try {
+        const storedUser = localStorage.getItem("user")
+        if (storedUser) {
+          setUser(JSON.parse(storedUser))
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    window.addEventListener("user-profile-updated", syncUserFromStorage)
+    window.addEventListener("storage", syncUserFromStorage)
+    return () => {
+      window.removeEventListener("user-profile-updated", syncUserFromStorage)
+      window.removeEventListener("storage", syncUserFromStorage)
+    }
   }, [])
 
   // Close dropdown when clicking outside
@@ -119,11 +138,14 @@ export default function HomePage() {
                     className="flex items-center gap-2 h-11 px-3 rounded-xl hover:bg-slate-100 transition-colors group"
                   >
                     {/* Avatar circle */}
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-black shadow-lg"
-                      style={{ background: "linear-gradient(135deg,#6366f1,#a855f7)" }}
-                    >
-                      {initials}
+                    <div className="w-9 h-9 rounded-xl overflow-hidden shadow-lg" style={{ background: "linear-gradient(135deg,#6366f1,#a855f7)" }}>
+                      {user?.profile_image ? (
+                        <img src={user.profile_image} alt={user.name || "User"} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-white text-sm font-black">
+                          {initials}
+                        </div>
+                      )}
                     </div>
                     <span className="hidden md:block text-sm font-bold text-slate-700 group-hover:text-slate-900 transition-colors max-w-[120px] truncate">
                       {user.name}
@@ -262,11 +284,6 @@ export default function HomePage() {
         <div className="container mx-auto px-6 relative z-10">
           <div className="max-w-5xl mx-auto text-center">
 
-            <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full bg-slate-900 text-white text-xs font-bold uppercase tracking-widest mb-10 shadow-xl hover:scale-105 transition-transform cursor-default">
-              <Zap className="h-4 w-4 text-indigo-400" />
-              <span>v2.0 Now Available</span>
-            </div>
-
             <h1 className="text-7xl md:text-9xl font-black text-slate-900 mb-8 tracking-tighter leading-none">
               Eventify<span className="text-indigo-600">.</span>
             </h1>
@@ -316,7 +333,7 @@ export default function HomePage() {
             </div>
 
             {/* 🔹 EVENT DETAILS CTA BUTTON */}
-            {role !== "user" && (
+            {user && role !== "user" && (
               <div className="mt-8 flex justify-center">
                 <Link href={user ? "/dashboard/events/new" : "/signup?from=event-cta"} className="w-full sm:w-auto">
                   <Button

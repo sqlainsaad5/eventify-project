@@ -29,6 +29,7 @@ function SignUpInner() {
     role: "organizer",   // always default to organizer
   })
   const [loading, setLoading] = useState(false)
+  const strongPasswordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
@@ -51,8 +52,8 @@ function SignUpInner() {
       setLoading(false)
       return
     }
-    if (formData.password.length < 6) {
-      toast.error("Password must be at least 6 characters!")
+    if (!strongPasswordRegex.test(formData.password)) {
+      toast.error("Password must be at least 8 characters and include uppercase, number, and special character.")
       setLoading(false)
       return
     }

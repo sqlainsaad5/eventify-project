@@ -6,13 +6,14 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
-import { Sparkles, ArrowRight, Github } from "lucide-react"
+import { Sparkles, ArrowRight, Eye, EyeOff } from "lucide-react"
 
 function LoginContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [formData, setFormData] = useState({ email: "", password: "" })
     const [loading, setLoading] = useState(false)
+    const [showPassword, setShowPassword] = useState(false)
 
     useEffect(() => {
         const error = searchParams.get("error")
@@ -138,22 +139,36 @@ function LoginContent() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <div className="flex justify-between items-center px-1">
+                                    <div className="flex items-center px-1">
                                         <label htmlFor="password" className="text-xs font-bold text-slate-400 uppercase tracking-widest">
                                             Password
                                         </label>
-                                        <Link href="#" className="text-xs font-bold text-purple-600 hover:text-purple-700">Forgot?</Link>
                                     </div>
-                                    <Input
-                                        id="password"
-                                        type="password"
-                                        placeholder="••••••••"
-                                        value={formData.password}
-                                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                        required
-                                        autoComplete="current-password"
-                                        className="h-14 bg-slate-50 border-transparent focus:bg-white focus:border-purple-200 rounded-2xl text-slate-900 font-medium px-5 transition-all outline-none ring-0 placeholder:text-slate-300 text-lg"
-                                    />
+                                    <div className="relative">
+                                        <Input
+                                            id="password"
+                                            type={showPassword ? "text" : "password"}
+                                            placeholder="••••••••"
+                                            value={formData.password}
+                                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                            required
+                                            autoComplete="current-password"
+                                            className="hide-native-password-reveal h-14 bg-slate-50 border-transparent focus:bg-white focus:border-purple-200 rounded-2xl text-slate-900 font-medium pl-5 pr-12 transition-all outline-none ring-0 placeholder:text-slate-300 text-lg"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword((prev) => !prev)}
+                                            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                                            aria-label={showPassword ? "Hide password" : "Show password"}
+                                        >
+                                            {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                        </button>
+                                    </div>
+                                    <div className="flex justify-end px-1">
+                                        <Link href="/forgot-password" className="text-xs font-bold text-purple-600 hover:text-purple-700">
+                                            Forgot Password?
+                                        </Link>
+                                    </div>
                                 </div>
                             </div>
 
@@ -180,7 +195,7 @@ function LoginContent() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4">
                             <Button
                                 type="button"
                                 onClick={handleGoogleLogin}
@@ -194,14 +209,6 @@ function LoginContent() {
                                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                                 </svg>
                                 Google
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                className="h-14 border-slate-100 hover:bg-slate-50 rounded-2xl font-bold text-slate-600 transition-all flex items-center justify-center gap-2"
-                            >
-                                <Github className="w-5 h-5" />
-                                GitHub
                             </Button>
                         </div>
 

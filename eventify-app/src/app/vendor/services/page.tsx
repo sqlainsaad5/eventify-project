@@ -312,7 +312,7 @@ export default function VendorServicesPage() {
                     )}
                     <p className="text-xs font-semibold text-purple-600 flex items-center gap-1">
                       <DollarSign className="h-3 w-3" />
-                      Base Price: ${service.basePrice?.toLocaleString()}
+                      Base Price: Rs. {service.basePrice?.toLocaleString()}
                     </p>
                   </div>
 
@@ -332,7 +332,7 @@ export default function VendorServicesPage() {
                             <span className="text-xs font-medium text-slate-700">{pkg.packageName}</span>
                             <span className="text-xs font-bold text-purple-600 flex items-center">
                               <DollarSign className="h-3 w-3" />
-                              {pkg.price?.toLocaleString()}
+                              Rs. {pkg.price?.toLocaleString()}
                             </span>
                           </div>
                         ))}
