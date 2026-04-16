@@ -45,6 +45,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 interface Vendor {
   id: number;
   name: string;
@@ -53,7 +55,8 @@ interface Vendor {
   phone: string;
   city: string;
   profile_image?: string;
-  rating?: number;
+  rating?: number | null;
+  rating_count?: number;
   assigned_events: any[];
   assigned_events_count: number;
 }
@@ -173,7 +176,7 @@ function VendorsPageContent() {
   const fetchVendorServices = useCallback(async (vendorId: number) => {
     setServicesLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/vendor/services?vendor_id=${vendorId}`);
+      const response = await fetch(`${API_BASE}/api/vendor/services?vendor_id=${vendorId}`);
       if (response.ok) {
         const services = await response.json();
         setSelectedVendorServices(services);
@@ -249,7 +252,7 @@ function VendorsPageContent() {
     }
     try {
       setLoading(true);
-      const res = await fetch("http://localhost:5000/api/vendors", {
+      const res = await fetch(`${API_BASE}/api/vendors`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
@@ -275,7 +278,7 @@ function VendorsPageContent() {
       return;
     }
     try {
-      const res = await fetch("http://localhost:5000/api/events", {
+      const res = await fetch(`${API_BASE}/api/events`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
@@ -305,7 +308,7 @@ function VendorsPageContent() {
     const key = `${eventId}-${vendorId}`;
     setVerifyingKey(key);
     try {
-      const res = await fetch(`http://localhost:5000/api/vendors/events/${eventId}/vendors/${vendorId}/verify`, {
+      const res = await fetch(`${API_BASE}/api/vendors/events/${eventId}/vendors/${vendorId}/verify`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -329,7 +332,7 @@ function VendorsPageContent() {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:5000/api/chat/organizer/conversations`, {
+      const res = await fetch(`${API_BASE}/api/chat/organizer/conversations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
@@ -350,7 +353,7 @@ function VendorsPageContent() {
     setChatLoading(true);
     try {
       // ✅ Use the new full-conversation endpoint
-      const res = await fetch(`http://localhost:5000/api/chat/full-conversation/${vendorId}`, {
+      const res = await fetch(`${API_BASE}/api/chat/full-conversation/${vendorId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -359,7 +362,7 @@ function VendorsPageContent() {
 
         // ✅ Clear chat notifications for this vendor
         try {
-          fetch("http://localhost:5000/api/payments/notifications/clear-chat", {
+          fetch(`${API_BASE}/api/payments/notifications/clear-chat`, {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -374,7 +377,7 @@ function VendorsPageContent() {
         // Mark as read - the backend now handles context better
         // We can still try to mark as read if we have an event id
         if (data.messages.length > 0) {
-          await fetch("http://localhost:5000/api/chat/mark-read", {
+          await fetch(`${API_BASE}/api/chat/mark-read`, {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -435,7 +438,7 @@ function VendorsPageContent() {
     }
 
     try {
-      const res = await fetch("http://localhost:5000/api/chat/send", {
+      const res = await fetch(`${API_BASE}/api/chat/send`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -497,7 +500,7 @@ function VendorsPageContent() {
       return;
     }
     try {
-      const res = await fetch("http://localhost:5000/api/vendors/assign", {
+      const res = await fetch(`${API_BASE}/api/vendors/assign`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -625,9 +628,20 @@ function VendorsPageContent() {
                         {vendor.category}
                       </Badge>
                     </div>
-                    <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-md px-2 py-1 rounded-lg flex items-center gap-1">
-                      <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                      <span className="text-xs font-black text-slate-900">{vendor.rating || "5.0"}</span>
+                    <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl flex flex-col items-end gap-0.5 shadow-sm border border-white/60">
+                      <div className="flex items-center gap-1">
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+                        <span className="text-xs font-black text-slate-900 tabular-nums">
+                          {(vendor.rating_count ?? 0) > 0 && vendor.rating != null
+                            ? vendor.rating.toFixed(1)
+                            : "New"}
+                        </span>
+                      </div>
+                      {(vendor.rating_count ?? 0) > 0 ? (
+                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">
+                          {vendor.rating_count} organizer review{(vendor.rating_count ?? 0) === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <CardContent className="p-6">
@@ -784,9 +798,22 @@ function VendorsPageContent() {
                       </td>
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-1 bg-yellow-50 px-2 py-0.5 rounded-lg border border-yellow-100">
-                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                            <span className="text-[10px] font-black">{vendor.rating || "5.0"}</span>
+                          <div className="flex flex-col gap-0.5 bg-amber-50/90 px-2.5 py-1 rounded-lg border border-amber-100">
+                            <div className="flex items-center gap-1">
+                              <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                              <span className="text-[10px] font-black tabular-nums text-slate-900">
+                                {(vendor.rating_count ?? 0) > 0 && vendor.rating != null
+                                  ? vendor.rating.toFixed(1)
+                                  : "—"}
+                              </span>
+                            </div>
+                            {(vendor.rating_count ?? 0) > 0 ? (
+                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">
+                                {vendor.rating_count} review{(vendor.rating_count ?? 0) === 1 ? "" : "s"}
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-bold text-slate-400">No ratings yet</span>
+                            )}
                           </div>
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                             {vendor.assigned_events_count} active jobs

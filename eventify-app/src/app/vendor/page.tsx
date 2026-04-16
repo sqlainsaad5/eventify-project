@@ -18,9 +18,26 @@ import {
   MessageSquare,
   BarChart3,
   User,
+  Star,
+  Shield,
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+
+type OrganizerRatingSummary = {
+  vendor: { avg: number | null; count: number }
+}
+
+type OrganizerReviewRow = {
+  id: number
+  rating: number
+  comment: string | null
+  created_at: string | null
+  author_name?: string | null
+  event_id?: number
+}
 
 export default function VendorDashboard() {
   const [assignedEvents, setAssignedEvents] = useState<any[]>([])
@@ -30,6 +47,8 @@ export default function VendorDashboard() {
   const [loading, setLoading] = useState(true)
   const [vendorId, setVendorId] = useState<number | null>(null)
   const [token, setToken] = useState("")
+  const [organizerRatings, setOrganizerRatings] = useState<OrganizerRatingSummary | null>(null)
+  const [organizerReviewRows, setOrganizerReviewRows] = useState<OrganizerReviewRow[]>([])
 
   useEffect(() => {
     const t = localStorage.getItem("token")?.replace(/['"]+/g, "").trim() || ""
@@ -47,7 +66,7 @@ export default function VendorDashboard() {
     setLoading(true)
     try {
       // Fetch user profile for latest name
-      const userRes = await fetch("http://localhost:5000/api/auth/me", {
+      const userRes = await fetch(`${API_BASE}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (userRes.ok) {
@@ -58,7 +77,7 @@ export default function VendorDashboard() {
 
       // Fetch assigned events
       const eventsRes = await fetch(
-        `http://localhost:5000/api/vendors/assigned_events/${vendorId}`,
+        `${API_BASE}/api/vendors/assigned_events/${vendorId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       )
       if (eventsRes.ok) {
@@ -68,7 +87,7 @@ export default function VendorDashboard() {
 
       // Fetch services (uses vendor_id query param, no JWT)
       const servicesRes = await fetch(
-        `http://localhost:5000/api/vendor/services?vendor_id=${vendorId}`
+        `${API_BASE}/api/vendor/services?vendor_id=${vendorId}`
       )
       if (servicesRes.ok) {
         const d = await servicesRes.json()
@@ -78,12 +97,34 @@ export default function VendorDashboard() {
       // Fetch payment requests (vendor's own requests via /api/payments/request endpoint)
       // The backend /api/payments/requests returns organizer's requests, so we use vendor bookings endpoint
       const paymentsRes = await fetch(
-        `http://localhost:5000/api/vendors/${vendorId}/bookings`,
+        `${API_BASE}/api/vendors/${vendorId}/bookings`,
         { headers: { Authorization: `Bearer ${token}` } }
       )
       if (paymentsRes.ok) {
         const d = await paymentsRes.json()
         setPaymentRequests(Array.isArray(d) ? d : [])
+      }
+
+      const [sumRes, revRes] = await Promise.all([
+        fetch(`${API_BASE}/api/users/${vendorId}/rating-summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(
+          `${API_BASE}/api/users/${vendorId}/reviews?review_type=organizer_to_vendor&per_page=6&page=1`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ),
+      ])
+      if (sumRes.ok) {
+        const s = await sumRes.json()
+        setOrganizerRatings({ vendor: s.vendor })
+      } else {
+        setOrganizerRatings(null)
+      }
+      if (revRes.ok) {
+        const r = await revRes.json()
+        setOrganizerReviewRows(Array.isArray(r.reviews) ? r.reviews : [])
+      } else {
+        setOrganizerReviewRows([])
       }
     } catch (error) {
       console.error("Dashboard fetch error:", error)
@@ -171,6 +212,89 @@ export default function VendorDashboard() {
             href="/vendor/analytics"
           />
         </div>
+
+        {/* Organizer professional ratings */}
+        <Card className="border-slate-200/80 shadow-lg shadow-slate-200/40 rounded-[28px] overflow-hidden bg-white">
+          <div className="flex flex-col md:flex-row md:items-stretch gap-0">
+            <div className="md:w-[280px] shrink-0 bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-900 p-8 text-white flex flex-col justify-center">
+              <div className="flex items-center gap-2 text-indigo-200 mb-3">
+                <Shield className="h-5 w-5" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Organizer feedback</span>
+              </div>
+              {organizerRatings && organizerRatings.vendor.count > 0 ? (
+                <>
+                  <div className="flex items-end gap-2">
+                    <span className="text-5xl font-black tracking-tight leading-none">
+                      {organizerRatings.vendor.avg?.toFixed(1) ?? "—"}
+                    </span>
+                    <div className="flex pb-1">
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <Star
+                          key={n}
+                          className={`h-5 w-5 ${
+                            organizerRatings.vendor.avg != null && n <= Math.round(organizerRatings.vendor.avg)
+                              ? "fill-amber-400 text-amber-400"
+                              : "text-white/25"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-indigo-100/90 font-medium">
+                    Based on <span className="font-black text-white">{organizerRatings.vendor.count}</span> organizer
+                    {organizerRatings.vendor.count === 1 ? "" : "s"} after completed events.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-indigo-100/90 font-medium leading-relaxed">
+                  When organizers close out vendor payments, they can leave a professional rating. Yours will appear
+                  here to build trust with future partners.
+                </p>
+              )}
+            </div>
+            <CardContent className="flex-1 p-6 md:p-8">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4">Recent reviews</h3>
+              {organizerReviewRows.length === 0 ? (
+                <p className="text-slate-500 text-sm font-medium py-4">No organizer ratings yet.</p>
+              ) : (
+                <ul className="space-y-4">
+                  {organizerReviewRows.map((rev) => (
+                    <li
+                      key={rev.id}
+                      className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 flex flex-col gap-2"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <Star
+                              key={n}
+                              className={`h-4 w-4 ${n <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                            />
+                          ))}
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 shrink-0">
+                          {rev.created_at
+                            ? new Date(rev.created_at).toLocaleDateString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : ""}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-500">
+                        From organizer{rev.author_name ? `: ${rev.author_name}` : ""}
+                      </p>
+                      {rev.comment ? (
+                        <p className="text-sm text-slate-700 leading-relaxed font-medium">{rev.comment}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </div>
+        </Card>
 
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Upcoming Events */}

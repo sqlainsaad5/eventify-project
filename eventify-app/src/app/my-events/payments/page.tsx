@@ -9,6 +9,9 @@ import { Loader2, Sparkles, ArrowLeft, DollarSign, Briefcase, History, CreditCar
 import { toast } from "sonner"
 import { NotificationBell } from "@/components/notification-bell"
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal"
+import { ReviewDialog } from "@/components/review-dialog"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 interface OrganizerPaymentRequest {
   id: number
@@ -71,6 +74,12 @@ export default function MyEventsPaymentsPage() {
   const [currentClientSecret, setCurrentClientSecret] = useState("")
   const [currentAmount, setCurrentAmount] = useState(0)
   const [currentPaymentId, setCurrentPaymentId] = useState<number | null>(null)
+  const [organizerRatingPrompt, setOrganizerRatingPrompt] = useState<{
+    eventId: number
+    organizerId: number
+    organizerName: string
+    eventName: string
+  } | null>(null)
 
   const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
 
@@ -83,10 +92,10 @@ export default function MyEventsPaymentsPage() {
     try {
       setLoading(true)
       const [requestsRes, paymentsRes] = await Promise.all([
-        fetch("http://localhost:5000/api/payments/organizer-requests", {
+        fetch(`${API_BASE}/api/payments/organizer-requests`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch("http://localhost:5000/api/payments", {
+        fetch(`${API_BASE}/api/payments`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ])
@@ -127,7 +136,7 @@ export default function MyEventsPaymentsPage() {
     if (!token) return
     setProcessing(organizerRequestId)
     try {
-      const res = await fetch("http://localhost:5000/api/payments/create-payment-intent", {
+      const res = await fetch(`${API_BASE}/api/payments/create-payment-intent`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -161,7 +170,7 @@ export default function MyEventsPaymentsPage() {
     if (!token) return
     try {
       const res = await fetch(
-        `http://localhost:5000/api/payments/organizer-requests/${id}/reject`,
+        `${API_BASE}/api/payments/organizer-requests/${id}/reject`,
         {
           method: "PUT",
           headers: { Authorization: `Bearer ${token}` },
@@ -182,9 +191,15 @@ export default function MyEventsPaymentsPage() {
 
   const handleStripeSuccess = async (paymentIntent: { id: string }) => {
     const token = getToken()
+    let prompt: {
+      event_id: number
+      organizer_id: number
+      organizer_name?: string
+      event_name?: string
+    } | null = null
     if (currentPaymentId && token) {
-      await fetch(
-        `http://localhost:5000/api/payments/authorize-verify/${currentPaymentId}`,
+      const verifyRes = await fetch(
+        `${API_BASE}/api/payments/authorize-verify/${currentPaymentId}`,
         {
           method: "POST",
           headers: {
@@ -194,13 +209,25 @@ export default function MyEventsPaymentsPage() {
           body: JSON.stringify({ payment_intent: paymentIntent.id }),
         }
       )
+      const verifyJson = await verifyRes.json().catch(() => ({}))
+      if (verifyRes.ok && verifyJson.prompt_user_review_organizer) {
+        prompt = verifyJson.prompt_user_review_organizer
+      }
     }
     setIsCheckoutOpen(false)
     setCurrentClientSecret("")
     setCurrentAmount(0)
     setCurrentPaymentId(null)
     toast.success("Payment completed")
-    loadData()
+    await loadData()
+    if (prompt?.event_id && prompt?.organizer_id) {
+      setOrganizerRatingPrompt({
+        eventId: prompt.event_id,
+        organizerId: prompt.organizer_id,
+        organizerName: prompt.organizer_name || "Organizer",
+        eventName: prompt.event_name || "",
+      })
+    }
   }
 
   return (
@@ -416,6 +443,56 @@ export default function MyEventsPaymentsPage() {
           clientSecret={currentClientSecret}
           amount={currentAmount}
           onSuccess={handleStripeSuccess}
+        />
+
+        <ReviewDialog
+          open={organizerRatingPrompt !== null}
+          onOpenChange={(open) => {
+            if (!open) setOrganizerRatingPrompt(null)
+          }}
+          variant="professional"
+          title={
+            organizerRatingPrompt
+              ? `Rate ${organizerRatingPrompt.organizerName}`
+              : "Rate your organizer"
+          }
+          description={
+            organizerRatingPrompt
+              ? `Your final payment for “${organizerRatingPrompt.eventName}” is complete. Your rating helps other hosts choose organizers.`
+              : undefined
+          }
+          onSubmit={async (rating, comment) => {
+            if (!organizerRatingPrompt) return
+            const t = getToken()
+            if (!t) {
+              toast.error("Please sign in again")
+              return
+            }
+            const res = await fetch(
+              `${API_BASE}/api/events/${organizerRatingPrompt.eventId}/reviews`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${t}`,
+                },
+                body: JSON.stringify({
+                  review_type: "user_to_organizer",
+                  subject_id: organizerRatingPrompt.organizerId,
+                  rating,
+                  comment: comment || undefined,
+                }),
+              }
+            )
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+              toast.error(data.error || "Could not submit review")
+              throw new Error(data.error || "submit failed")
+            }
+            toast.success("Thanks — your feedback was saved.")
+            setOrganizerRatingPrompt(null)
+            loadData()
+          }}
         />
       </main>
     </div>

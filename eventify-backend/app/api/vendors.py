@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity  # ✅ ADD THIS IMPORT
-from app.models import User, Event, db, VendorEventVerification, PaymentRequest
+from sqlalchemy import func
+
+from app.models import User, Event, db, VendorEventVerification, PaymentRequest, Review
 from app.extensions import jwt
 
 vendors_bp = Blueprint("vendors", __name__, url_prefix="/api/vendors")
@@ -46,6 +48,17 @@ def get_vendors():
                     event_id=event.id, vendor_id=v.id
                 ).first() is not None
                 assigned_events_with_status.append(ev_dict)
+            avg_row = (
+                db.session.query(func.avg(Review.rating), func.count(Review.id))
+                .filter(
+                    Review.subject_id == v.id,
+                    Review.review_type == "organizer_to_vendor",
+                    Review.status == "published",
+                )
+                .one()
+            )
+            avg_r, cnt_r = avg_row[0], avg_row[1]
+            rating_avg = round(float(avg_r), 2) if avg_r is not None else None
             vendor_list.append({
                 "id": v.id,
                 "name": v.name,
@@ -54,7 +67,8 @@ def get_vendors():
                 "phone": getattr(v, "phone", "N/A"),
                 "city": getattr(v, "city", "Unknown"),
                 "profile_image": getattr(v, "profile_image", ""),
-                "rating": 4.5,
+                "rating": rating_avg,
+                "rating_count": int(cnt_r or 0),
                 "assigned_events": assigned_events_with_status,
                 "assigned_events_count": len(accepted_events),
             })

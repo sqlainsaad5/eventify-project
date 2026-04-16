@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/table"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { NotificationBell } from "@/components/notification-bell"
+import { ReviewDialog } from "@/components/review-dialog"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
@@ -93,6 +94,12 @@ export default function BudgetPage() {
   const [budgetInput, setBudgetInput] = useState("")
   const [savingBudget, setSavingBudget] = useState(false)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [vendorRatingPrompt, setVendorRatingPrompt] = useState<{
+    eventId: number
+    vendorId: number
+    vendorName: string
+    eventName: string
+  } | null>(null)
   const [paymentModalData, setPaymentModalData] = useState<{
     vendor_id: number
     vendor_name: string
@@ -297,6 +304,15 @@ export default function BudgetPage() {
         setPaymentModalData(null)
         fetchSummary()
         fetchPayments()
+        const p = data.prompt_vendor_review
+        if (p?.event_id && p?.vendor_id) {
+          setVendorRatingPrompt({
+            eventId: p.event_id,
+            vendorId: p.vendor_id,
+            vendorName: p.vendor_name || "Vendor",
+            eventName: p.event_name || "",
+          })
+        }
       } else {
         toast.error(data.error || "Failed to register payment")
       }
@@ -967,6 +983,57 @@ export default function BudgetPage() {
             </DialogContent>
           </Dialog>
         )}
+
+        <ReviewDialog
+          open={vendorRatingPrompt !== null}
+          onOpenChange={(open) => {
+            if (!open) setVendorRatingPrompt(null)
+          }}
+          variant="professional"
+          title={
+            vendorRatingPrompt
+              ? `Rate ${vendorRatingPrompt.vendorName}`
+              : "Rate vendor"
+          }
+          description={
+            vendorRatingPrompt
+              ? `Final payment for “${vendorRatingPrompt.eventName}” is recorded. Share a brief professional rating—this helps other organizers choose reliable partners.`
+              : undefined
+          }
+          onSubmit={async (rating, comment) => {
+            if (!vendorRatingPrompt) return
+            const t = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+            if (!t) {
+              toast.error("Please sign in again")
+              return
+            }
+            const res = await fetch(
+              `${API_BASE}/api/events/${vendorRatingPrompt.eventId}/reviews`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${t}`,
+                },
+                body: JSON.stringify({
+                  review_type: "organizer_to_vendor",
+                  subject_id: vendorRatingPrompt.vendorId,
+                  rating,
+                  comment: comment || undefined,
+                }),
+              }
+            )
+            const errBody = await res.json().catch(() => ({}))
+            if (!res.ok) {
+              toast.error(errBody.error || "Could not save your review")
+              throw new Error(errBody.error || "review failed")
+            }
+            toast.success("Thank you — your rating was saved.")
+            setVendorRatingPrompt(null)
+            fetchSummary()
+            fetchPayments()
+          }}
+        />
       </main>
     </div>
   )

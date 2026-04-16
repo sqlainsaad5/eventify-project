@@ -21,7 +21,8 @@ import {
   Loader2,
   Clock,
   ExternalLink,
-  MessageSquare
+  MessageSquare,
+  Star
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -32,6 +33,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
+import { ReviewDialog } from "@/components/review-dialog"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 interface Event {
   id: number
@@ -46,6 +50,14 @@ interface Event {
   user_id?: number
   organizer_id?: number | null
   status?: string
+  organizer_advance_paid?: boolean
+  organizer_final_paid?: boolean
+  completed_vendors?: { id: number; name: string }[]
+}
+
+interface AssignedReviewStatus {
+  my_organizer_to_vendor: Record<string, Record<string, unknown> | null>
+  can_review_vendor_ids: number[]
 }
 
 export default function AllEventsPage() {
@@ -59,15 +71,66 @@ export default function AllEventsPage() {
   const [activeTab, setActiveTab] = useState<"personal" | "assigned">("personal")
   const [requestedAdvanceEventIds, setRequestedAdvanceEventIds] = useState<number[]>([])
   const [completingEventId, setCompletingEventId] = useState<number | null>(null)
+  const [assignedReviewByEvent, setAssignedReviewByEvent] = useState<Record<number, AssignedReviewStatus>>({})
+  const [vendorReviewDialog, setVendorReviewDialog] = useState<{
+    eventId: number
+    vendorId: number
+    vendorName: string
+  } | null>(null)
 
   useEffect(() => {
     fetchEvents()
   }, [])
 
+  const fetchAssignedReviewStatuses = async (assigned: Event[]) => {
+    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+    if (!token) return
+    const targets = assigned.filter((e) => (e.completed_vendors?.length ?? 0) > 0 || e.status === "completed")
+    if (targets.length === 0) {
+      setAssignedReviewByEvent({})
+      return
+    }
+    const results = await Promise.all(
+      targets.map(async (e) => {
+        try {
+          const res = await fetch(`${API_BASE}/api/events/${e.id}/review-status`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (!res.ok) return [e.id, null] as const
+          const data = await res.json()
+          return [
+            e.id,
+            {
+              my_organizer_to_vendor: (data.my_organizer_to_vendor || {}) as Record<
+                string,
+                Record<string, unknown> | null
+              >,
+              can_review_vendor_ids: (data.can_review_vendor_ids || []) as number[],
+            },
+          ] as const
+        } catch {
+          return [e.id, null] as const
+        }
+      })
+    )
+    const next: Record<number, AssignedReviewStatus> = {}
+    for (const [id, row] of results) {
+      if (row) next[id] = row
+    }
+    setAssignedReviewByEvent(next)
+  }
+
+  useEffect(() => {
+    if (assignedEvents.length === 0) return
+    fetchAssignedReviewStatuses(assignedEvents)
+    const t = setInterval(() => fetchAssignedReviewStatuses(assignedEvents), 30000)
+    return () => clearInterval(t)
+  }, [assignedEvents])
+
   useEffect(() => {
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     if (!token) return
-    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+    fetch(`${API_BASE}/api/payments/notifications/mark-read-by-action`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action: "assignment_review" }),
@@ -76,22 +139,24 @@ export default function AllEventsPage() {
     }).catch(() => {})
   }, [])
 
-  const fetchEvents = async () => {
+  const fetchEvents = async (): Promise<Event[]> => {
     setLoading(true)
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+    let assigned: Event[] = []
     try {
       const [eventsRes, organizerRequestsRes] = await Promise.all([
-        fetch("http://localhost:5000/api/events", {
+        fetch(`${API_BASE}/api/events`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch("http://localhost:5000/api/payments/organizer-requests", {
+        fetch(`${API_BASE}/api/payments/organizer-requests`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ])
       if (eventsRes.ok) {
         const data = await eventsRes.json()
         setEvents(data.created || [])
-        setAssignedEvents(data.assigned || [])
+        assigned = data.assigned || []
+        setAssignedEvents(assigned)
       } else {
         toast.error("Failed to fetch events")
       }
@@ -105,12 +170,13 @@ export default function AllEventsPage() {
     } finally {
       setLoading(false)
     }
+    return assigned
   }
 
   const handleAssignmentResponse = async (id: number, status: 'accepted' | 'rejected') => {
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     try {
-      const res = await fetch(`http://localhost:5000/api/events/${id}/respond-assignment`, {
+      const res = await fetch(`${API_BASE}/api/events/${id}/respond-assignment`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -136,7 +202,7 @@ export default function AllEventsPage() {
 
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     try {
-      const res = await fetch(`http://localhost:5000/api/events/${id}`, {
+      const res = await fetch(`${API_BASE}/api/events/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -460,7 +526,7 @@ export default function AllEventsPage() {
                                     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
                                     try {
                                       const res = await fetch(
-                                        `http://localhost:5000/api/events/${event.id}/create-advance-request`,
+                                        `${API_BASE}/api/events/${event.id}/create-advance-request`,
                                         {
                                           method: "POST",
                                           headers: {
@@ -513,7 +579,7 @@ export default function AllEventsPage() {
                                       setCompletingEventId(event.id)
                                       try {
                                         const res = await fetch(
-                                          `http://localhost:5000/api/events/${event.id}/complete`,
+                                          `${API_BASE}/api/events/${event.id}/complete`,
                                           { method: "POST", headers: { Authorization: `Bearer ${token}` } }
                                         )
                                         const data = await res.json().catch(() => ({}))
@@ -705,6 +771,48 @@ export default function AllEventsPage() {
                         <span className="text-purple-600">100%</span>
                       </div>
                       <Progress value={100} className="h-2 bg-slate-100" />
+                      {activeTab === "assigned" &&
+                        event.completed_vendors &&
+                        event.completed_vendors.length > 0 && (
+                          <div className="pt-3 mt-3 border-t border-slate-200 space-y-2">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                              Rate vendors
+                            </p>
+                            {event.completed_vendors.map((v) => {
+                              const reviewed =
+                                assignedReviewByEvent[event.id]?.my_organizer_to_vendor?.[String(v.id)]
+                              if (reviewed) {
+                                return (
+                                  <p
+                                    key={v.id}
+                                    className="text-xs font-bold text-emerald-600"
+                                  >
+                                    Reviewed {v.name}
+                                  </p>
+                                )
+                              }
+                              return (
+                                <Button
+                                  key={v.id}
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full rounded-xl border-amber-200 bg-amber-50/80 text-amber-900 hover:bg-amber-100 font-black text-[10px] uppercase tracking-widest gap-2"
+                                  onClick={() =>
+                                    setVendorReviewDialog({
+                                      eventId: event.id,
+                                      vendorId: v.id,
+                                      vendorName: v.name,
+                                    })
+                                  }
+                                >
+                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+                                  Rate {v.name}
+                                </Button>
+                              )
+                            })}
+                          </div>
+                        )}
                     </div>
                   </CardContent>
                 </Card>
@@ -712,6 +820,45 @@ export default function AllEventsPage() {
             </div>
           </div>
         )}
+
+        <ReviewDialog
+          open={vendorReviewDialog !== null}
+          onOpenChange={(open) => {
+            if (!open) setVendorReviewDialog(null)
+          }}
+          variant="professional"
+          title={vendorReviewDialog ? `Rate ${vendorReviewDialog.vendorName}` : "Rate vendor"}
+          description="Your professional rating is visible to this vendor and helps other organizers choose reliable partners."
+          onSubmit={async (rating, comment) => {
+            if (!vendorReviewDialog) return
+            const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+            if (!token) {
+              toast.error("Please sign in again")
+              return
+            }
+            const res = await fetch(`${API_BASE}/api/events/${vendorReviewDialog.eventId}/reviews`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                review_type: "organizer_to_vendor",
+                subject_id: vendorReviewDialog.vendorId,
+                rating,
+                comment: comment || undefined,
+              }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+              toast.error(data.error || "Could not submit review")
+              throw new Error(data.error || "submit failed")
+            }
+            toast.success("Thanks for your feedback")
+            const assigned = await fetchEvents()
+            await fetchAssignedReviewStatuses(assigned.length ? assigned : assignedEvents)
+          }}
+        />
       </div>
     </DashboardLayout>
   )

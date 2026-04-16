@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify, redirect
-from app.models import User
+from sqlalchemy import func
+
+from app.models import User, Review
 from app.extensions import db, jwt , mail
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import timedelta
@@ -455,7 +457,23 @@ def get_organizers():
     """Get all active users with the 'organizer' role"""
     try:
         organizers = User.query.filter_by(role='organizer', is_active=True).all()
-        return jsonify([o.to_dict() for o in organizers]), 200
+        result = []
+        for o in organizers:
+            d = o.to_dict()
+            row = (
+                db.session.query(func.avg(Review.rating), func.count(Review.id))
+                .filter(
+                    Review.subject_id == o.id,
+                    Review.review_type == "user_to_organizer",
+                    Review.status == "published",
+                )
+                .one()
+            )
+            avg, cnt = row[0], row[1]
+            d["host_rating_avg"] = round(float(avg), 2) if avg is not None else None
+            d["host_rating_count"] = int(cnt or 0)
+            result.append(d)
+        return jsonify(result), 200
     except Exception as e:
         print(f"❌ Error fetching organizers: {e}")
         return jsonify({"error": str(e)}), 500

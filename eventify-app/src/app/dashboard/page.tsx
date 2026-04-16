@@ -15,11 +15,15 @@ import {
   MapPin,
   Clock,
   Plus,
-  Loader2
+  Loader2,
+  Star,
+  Shield,
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 // Dashboard Version: 1.1.2 (Defensive Update)
 
@@ -41,6 +45,10 @@ export default function DashboardPage() {
     return "Organizer"
   })
   const [loading, setLoading] = useState(true)
+  const [hostRatingSummary, setHostRatingSummary] = useState<{ avg: number | null; count: number } | null>(null)
+  const [hostReviewRows, setHostReviewRows] = useState<
+    { id: number; rating: number; comment: string | null; created_at: string | null; author_name?: string | null }[]
+  >([])
 
   useEffect(() => {
     const savedRole = localStorage.getItem("role")
@@ -72,20 +80,49 @@ export default function DashboardPage() {
         const userData = await userRes.json()
         setUserName(userData.name)
         localStorage.setItem("user", JSON.stringify(userData))
+        const uid = userData.id
+        if (uid && token) {
+          try {
+            const [sumRes, revRes] = await Promise.all([
+              fetch(`${API_BASE}/api/users/${uid}/rating-summary`, {
+                headers: { Authorization: `Bearer ${token}` },
+              }),
+              fetch(
+                `${API_BASE}/api/users/${uid}/reviews?review_type=user_to_organizer&per_page=5&page=1`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              ),
+            ])
+            if (sumRes.ok) {
+              const s = await sumRes.json()
+              setHostRatingSummary(s.organizer ?? null)
+            } else {
+              setHostRatingSummary(null)
+            }
+            if (revRes.ok) {
+              const r = await revRes.json()
+              setHostReviewRows(Array.isArray(r.reviews) ? r.reviews : [])
+            } else {
+              setHostReviewRows([])
+            }
+          } catch {
+            setHostRatingSummary(null)
+            setHostReviewRows([])
+          }
+        }
       }
 
       // 2. Fetch Events, Payments, Organizer Requests, and Vendors
       const [eventsRes, paymentsRes, organizerRequestsRes, vendorsRes] = await Promise.all([
-        fetch("http://localhost:5000/api/events", {
+        fetch(`${API_BASE}/api/events`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch("http://localhost:5000/api/payments/requests", {
+        fetch(`${API_BASE}/api/payments/requests`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch("http://localhost:5000/api/payments/organizer-requests", {
+        fetch(`${API_BASE}/api/payments/organizer-requests`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch("http://localhost:5000/api/vendors", {
+        fetch(`${API_BASE}/api/vendors`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ])
@@ -226,6 +263,87 @@ export default function DashboardPage() {
             href="/my-events/budget"
           />
         </div>
+
+        <Card className="border-slate-200/80 shadow-lg shadow-slate-200/40 rounded-[28px] overflow-hidden bg-white">
+          <div className="flex flex-col md:flex-row md:items-stretch gap-0">
+            <div className="md:w-[280px] shrink-0 bg-gradient-to-br from-slate-900 via-violet-950 to-purple-900 p-8 text-white flex flex-col justify-center">
+              <div className="flex items-center gap-2 text-violet-200 mb-3">
+                <Shield className="h-5 w-5" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Client ratings</span>
+              </div>
+              {hostRatingSummary && hostRatingSummary.count > 0 ? (
+                <>
+                  <div className="flex items-end gap-2">
+                    <span className="text-5xl font-black tracking-tight leading-none">
+                      {hostRatingSummary.avg?.toFixed(1) ?? "—"}
+                    </span>
+                    <div className="flex pb-1">
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <Star
+                          key={n}
+                          className={`h-5 w-5 ${
+                            hostRatingSummary.avg != null && n <= Math.round(hostRatingSummary.avg)
+                              ? "fill-amber-400 text-amber-400"
+                              : "text-white/25"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-violet-100/90 font-medium">
+                    From <span className="font-black text-white">{hostRatingSummary.count}</span> event host
+                    {hostRatingSummary.count === 1 ? "" : "s"} after completed events.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-violet-100/90 font-medium leading-relaxed">
+                  When clients pay your final fee and rate their experience, scores appear here so new hosts can trust your track record.
+                </p>
+              )}
+            </div>
+            <CardContent className="flex-1 p-6 md:p-8">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4">Recent host feedback</h3>
+              {hostReviewRows.length === 0 ? (
+                <p className="text-slate-500 text-sm font-medium py-4">No client ratings yet.</p>
+              ) : (
+                <ul className="space-y-4">
+                  {hostReviewRows.map((rev) => (
+                    <li
+                      key={rev.id}
+                      className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 flex flex-col gap-2"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <Star
+                              key={n}
+                              className={`h-4 w-4 ${n <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                            />
+                          ))}
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 shrink-0">
+                          {rev.created_at
+                            ? new Date(rev.created_at).toLocaleDateString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : ""}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-500">
+                        From host{rev.author_name ? `: ${rev.author_name}` : ""}
+                      </p>
+                      {rev.comment ? (
+                        <p className="text-sm text-slate-700 leading-relaxed font-medium">{rev.comment}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </div>
+        </Card>
 
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">

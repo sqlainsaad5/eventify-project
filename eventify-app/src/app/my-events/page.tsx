@@ -18,7 +18,8 @@ import {
     MoreVertical,
     Target,
     MessageSquare,
-    Wallet
+    Wallet,
+    Star
 } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -29,6 +30,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import { NotificationBell } from "@/components/notification-bell"
+import { ReviewDialog } from "@/components/review-dialog"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 interface Event {
     id: number
@@ -44,6 +48,11 @@ interface Event {
     organizer_status?: string
     status?: string
     application_count?: number
+}
+
+interface EventReviewStatus {
+    can_review_organizer: boolean
+    my_user_to_organizer: Record<string, unknown> | null
 }
 
 interface Application {
@@ -71,27 +80,82 @@ export default function MyEventsPage() {
     const [applications, setApplications] = useState<Application[]>([])
     const [loadingApplications, setLoadingApplications] = useState(false)
     const [assigningOrganizerId, setAssigningOrganizerId] = useState<number | null>(null)
+    const [reviewStatusByEvent, setReviewStatusByEvent] = useState<Record<number, EventReviewStatus>>({})
+    const [reviewDialog, setReviewDialog] = useState<{
+        eventId: number
+        organizerId: number
+        organizerName: string
+    } | null>(null)
     const router = useRouter()
 
     useEffect(() => {
         fetchEvents()
     }, [])
 
-    const fetchEvents = async () => {
+    const fetchReviewStatuses = async (eventList: Event[]) => {
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+        if (!token) return
+        const targets = eventList.filter(
+            (e) =>
+                e.status === "completed" &&
+                e.organizer_status === "accepted" &&
+                e.organizer_id != null
+        )
+        if (targets.length === 0) {
+            setReviewStatusByEvent({})
+            return
+        }
+        const results = await Promise.all(
+            targets.map(async (e) => {
+                try {
+                    const res = await fetch(`${API_BASE}/api/events/${e.id}/review-status`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    })
+                    if (!res.ok) return [e.id, null] as const
+                    const data = await res.json()
+                    return [
+                        e.id,
+                        {
+                            can_review_organizer: !!data.can_review_organizer,
+                            my_user_to_organizer: data.my_user_to_organizer,
+                        },
+                    ] as const
+                } catch {
+                    return [e.id, null] as const
+                }
+            })
+        )
+        const next: Record<number, EventReviewStatus> = {}
+        for (const [id, row] of results) {
+            if (row) next[id] = row
+        }
+        setReviewStatusByEvent(next)
+    }
+
+    useEffect(() => {
+        if (events.length === 0) return
+        fetchReviewStatuses(events)
+        const t = setInterval(() => fetchReviewStatuses(events), 30000)
+        return () => clearInterval(t)
+    }, [events])
+
+    const fetchEvents = async (): Promise<Event[]> => {
         setLoading(true)
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
         if (!token) {
             setLoading(false)
-            return
+            return []
         }
+        let created: Event[] = []
         try {
             const [eventsRes, requestsRes] = await Promise.all([
-                fetch("http://localhost:5000/api/events", { headers: { Authorization: `Bearer ${token}` } }),
-                fetch("http://localhost:5000/api/payments/organizer-requests", { headers: { Authorization: `Bearer ${token}` } })
+                fetch(`${API_BASE}/api/events`, { headers: { Authorization: `Bearer ${token}` } }),
+                fetch(`${API_BASE}/api/payments/organizer-requests`, { headers: { Authorization: `Bearer ${token}` } })
             ])
             if (eventsRes.ok) {
                 const data = await eventsRes.json()
-                setEvents(data.created || [])
+                created = data.created || []
+                setEvents(created)
             } else {
                 toast.error("Failed to load your events")
             }
@@ -105,6 +169,7 @@ export default function MyEventsPage() {
         } finally {
             setLoading(false)
         }
+        return created
     }
 
     const handleDelete = async (id: number) => {
@@ -112,7 +177,7 @@ export default function MyEventsPage() {
 
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
         try {
-            const res = await fetch(`http://localhost:5000/api/events/${id}`, {
+            const res = await fetch(`${API_BASE}/api/events/${id}`, {
                 method: "DELETE",
                 headers: { Authorization: `Bearer ${token}` }
             })
@@ -131,7 +196,7 @@ export default function MyEventsPage() {
         setLoadingApplications(true)
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
         try {
-            const res = await fetch(`http://localhost:5000/api/events/${eventId}/applications`, {
+            const res = await fetch(`${API_BASE}/api/events/${eventId}/applications`, {
                 headers: { Authorization: `Bearer ${token}` }
             })
             if (res.ok) {
@@ -152,7 +217,7 @@ export default function MyEventsPage() {
         if (!token) return
         setAssigningOrganizerId(organizerId)
         try {
-            const res = await fetch(`http://localhost:5000/api/events/${eventId}/assign-organizer`, {
+            const res = await fetch(`${API_BASE}/api/events/${eventId}/assign-organizer`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -481,6 +546,34 @@ export default function MyEventsPage() {
                                                 Message Expert
                                             </Button>
                                         )}
+
+                                        {event.status === "completed" &&
+                                            event.organizer_id &&
+                                            event.organizer_status === "accepted" &&
+                                            reviewStatusByEvent[event.id]?.can_review_organizer &&
+                                            !reviewStatusByEvent[event.id]?.my_user_to_organizer && (
+                                                <Button
+                                                    onClick={() =>
+                                                        setReviewDialog({
+                                                            eventId: event.id,
+                                                            organizerId: event.organizer_id!,
+                                                            organizerName: event.organizer_name || "Organizer",
+                                                        })
+                                                    }
+                                                    variant="outline"
+                                                    className="w-full border-amber-200 bg-amber-50/80 text-amber-900 hover:bg-amber-100 rounded-2xl h-12 font-black uppercase tracking-widest text-[11px] gap-2"
+                                                >
+                                                    <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+                                                    Rate organizer
+                                                </Button>
+                                            )}
+
+                                        {event.status === "completed" &&
+                                            reviewStatusByEvent[event.id]?.my_user_to_organizer && (
+                                                <p className="text-center text-[10px] font-black uppercase tracking-widest text-emerald-600">
+                                                    You submitted feedback for this organizer
+                                                </p>
+                                            )}
                                     </div>
                                 </CardContent>
                             </Card>
@@ -571,6 +664,44 @@ export default function MyEventsPage() {
                     </div>
                 </div>
             )}
+
+            <ReviewDialog
+                open={reviewDialog !== null}
+                onOpenChange={(open) => {
+                    if (!open) setReviewDialog(null)
+                }}
+                title={reviewDialog ? `Rate ${reviewDialog.organizerName}` : "Rate organizer"}
+                description="Your rating helps other hosts choose organizers. This is shared publicly as an aggregate and optional comment."
+                onSubmit={async (rating, comment) => {
+                    if (!reviewDialog) return
+                    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+                    if (!token) {
+                        toast.error("Please sign in again")
+                        return
+                    }
+                    const res = await fetch(`${API_BASE}/api/events/${reviewDialog.eventId}/reviews`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({
+                            review_type: "user_to_organizer",
+                            subject_id: reviewDialog.organizerId,
+                            rating,
+                            comment: comment || undefined,
+                        }),
+                    })
+                    const data = await res.json().catch(() => ({}))
+                    if (!res.ok) {
+                        toast.error(data.error || "Could not submit review")
+                        throw new Error(data.error || "submit failed")
+                    }
+                    toast.success("Thanks for your feedback")
+                    const updated = await fetchEvents()
+                    await fetchReviewStatuses(updated.length ? updated : events)
+                }}
+            />
         </div>
     )
 }

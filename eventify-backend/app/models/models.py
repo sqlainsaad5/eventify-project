@@ -142,7 +142,12 @@ class Event(db.Model):
             "organizer_id": self.organizer_id,
             "organizer_name": self.organizer.name if self.organizer else None,
             "organizer_status": self.organizer_status,
-            "assigned_vendors": [vendor.name for vendor in self.assigned_vendors] if self.assigned_vendors else []
+            "assigned_vendors": [vendor.name for vendor in self.assigned_vendors.all()],
+            "assigned_vendor_ids": [v.id for v in self.assigned_vendors.all()],
+            "completed_vendor_ids": [v.id for v in self.completed_by_vendors.all()],
+            "completed_vendors": [
+                {"id": v.id, "name": v.name or "Vendor"} for v in self.completed_by_vendors.all()
+            ],
         }
 
 
@@ -277,6 +282,46 @@ class Payment(db.Model):
         }
 
 # Add this to your existing models.py
+
+class Review(db.Model):
+    """Event-scoped feedback: users rate organizers; organizers rate vendors."""
+
+    __tablename__ = "review"
+    __table_args__ = (
+        db.UniqueConstraint("event_id", "author_id", "review_type", name="uq_review_event_author_type"),
+        db.Index("ix_review_subject_type_status", "subject_id", "review_type", "status"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    author_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    review_type = db.Column(db.String(40), nullable=False)  # user_to_organizer | organizer_to_vendor
+    rating = db.Column(db.Integer, nullable=False)
+    comment = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="published")
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    event = db.relationship("Event", backref=db.backref("reviews", lazy="dynamic"))
+    author = db.relationship("User", foreign_keys=[author_id], backref="reviews_authored")
+    subject = db.relationship("User", foreign_keys=[subject_id], backref="reviews_received")
+
+    def to_dict(self, include_author: bool = True):
+        d = {
+            "id": self.id,
+            "event_id": self.event_id,
+            "author_id": self.author_id,
+            "subject_id": self.subject_id,
+            "review_type": self.review_type,
+            "rating": self.rating,
+            "comment": self.comment,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_author and self.author:
+            d["author_name"] = self.author.name
+        return d
+
 
 class ChatMessage(db.Model):
     __tablename__ = "chat_message"

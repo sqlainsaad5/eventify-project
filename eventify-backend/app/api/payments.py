@@ -1,6 +1,16 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import User, Event, db, PaymentRequest, Payment, OrganizerPaymentRequest, VendorEventVerification, EventVendorAgreement
+from app.models import (
+    User,
+    Event,
+    db,
+    PaymentRequest,
+    Payment,
+    OrganizerPaymentRequest,
+    VendorEventVerification,
+    EventVendorAgreement,
+    Review,
+)
 from sqlalchemy import or_, and_
 from datetime import datetime
 import stripe
@@ -10,6 +20,70 @@ payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
 
 # Initialize Stripe
 stripe.api_key = Config.STRIPE_SECRET_KEY
+
+
+def _prompt_vendor_review_after_final(event, organizer_user_id, vendor_id):
+    """
+    When the assigned organizer registers the final vendor payment, prompt them
+    to leave a professional rating (UI). We no longer require the vendor to have
+    used "mark event complete"; many organizers only record the final payment.
+    """
+    if event.organizer_id != organizer_user_id:
+        return None
+    actor = User.query.get(organizer_user_id)
+    if not actor or actor.role != "organizer":
+        return None
+    if Review.query.filter_by(
+        event_id=event.id,
+        author_id=organizer_user_id,
+        subject_id=vendor_id,
+        review_type="organizer_to_vendor",
+        status="published",
+    ).first():
+        return None
+    vendor = User.query.get(vendor_id)
+    return {
+        "event_id": event.id,
+        "event_name": event.name,
+        "vendor_id": vendor_id,
+        "vendor_name": (vendor.name if vendor else None) or "Vendor",
+    }
+
+
+def _prompt_user_review_organizer_after_final_organizer_payment(opr):
+    """After the event owner pays the final 75% organizer fee, invite them to rate the organizer."""
+    event = opr.event
+    if not event or not event.organizer_id:
+        return None
+    total_budget = float(event.budget or 0)
+    paid_amount = float(opr.amount or 0)
+    final_amount = round(total_budget * 0.75, 2) if total_budget > 0 else 0
+    is_final = total_budget > 0 and abs(paid_amount - final_amount) < 0.01
+    if not is_final:
+        return None
+    client = User.query.get(event.user_id)
+    if not client or client.role != "user":
+        return None
+    if event.organizer_status != "accepted":
+        return None
+    if event.status != "completed":
+        return None
+    if Review.query.filter_by(
+        event_id=event.id,
+        author_id=event.user_id,
+        subject_id=event.organizer_id,
+        review_type="user_to_organizer",
+        status="published",
+    ).first():
+        return None
+    org = User.query.get(event.organizer_id)
+    return {
+        "event_id": event.id,
+        "event_name": event.name,
+        "organizer_id": event.organizer_id,
+        "organizer_name": (org.name if org else None) or "Organizer",
+    }
+
 
 # Notification storage (Simulated)
 demo_notifications = []
@@ -45,7 +119,7 @@ def stripe_webhook():
         return jsonify({"error": "Webhook verification failed"}), 400
 
     if event["type"] == "payment_intent.succeeded":
-        handle_payment_success(event["data"]["object"])
+        handle_payment_success(event["data"]["object"])  # notifications include rate prompt when applicable
     elif event["type"] == "payment_intent.payment_failed":
         handle_payment_failure(event["data"]["object"])
 
@@ -64,6 +138,9 @@ def handle_payment_success(payment_intent):
 
     print(f"💰 Processing successful payment context: payment_id={payment_id}, request_id={request_id}, organizer_request_id={organizer_request_id}")
 
+    prompt_user_review_organizer = None
+    prompt_vendor_review = None
+
     if payment_id:
         try:
             payment = Payment.query.get(int(payment_id))
@@ -77,6 +154,13 @@ def handle_payment_success(payment_intent):
                     if pr:
                         pr.status = 'paid'
                         print(f"✅ Vendor settlement (Request {request_id}) marked as PAID")
+                        payment.vendor_id = pr.vendor_id
+                        payment.payment_type = "vendor_settlement"
+                        settle_event = pr.event
+                        if settle_event and settle_event.organizer_id:
+                            prompt_vendor_review = _prompt_vendor_review_after_final(
+                                settle_event, settle_event.organizer_id, pr.vendor_id
+                            )
                         create_notification(
                             pr.vendor_id,
                             "💰 Payment Received!",
@@ -124,6 +208,8 @@ def handle_payment_success(payment_intent):
                                 if getattr(event, "organizer_advance_paid", False) and not event.status:
                                     event.status = "completed"
 
+                                prompt_user_review_organizer = _prompt_user_review_organizer_after_final_organizer_payment(opr)
+
                         print(f"✅ Organizer request {organizer_request_id} marked as PAID")
                         create_notification(
                             opr.organizer_id,
@@ -135,14 +221,42 @@ def handle_payment_success(payment_intent):
 
                 db.session.commit()
                 print(f"✨ Payment {payment_id} marked as COMPLETED in database")
-                create_notification(payment.event.user_id, "✅ Payment Verified", "Funds successfully processed via Stripe.", "success")
-                return True
+                evt = payment.event
+                if prompt_user_review_organizer and evt:
+                    create_notification(
+                        evt.user_id,
+                        "✅ Payment verified — rate your organizer",
+                        "Your final organizer payment was processed. Share a short review to help other hosts choose professionals.",
+                        "success",
+                        {"action": "rate_organizer_after_payment", **prompt_user_review_organizer, "payment_verified": True},
+                    )
+                elif prompt_vendor_review and evt and evt.organizer_id:
+                    create_notification(
+                        evt.organizer_id,
+                        "✅ Vendor paid — share a quick rating",
+                        f"Settlement for “{evt.name}” is complete. Rate {prompt_vendor_review.get('vendor_name') or 'your vendor'} so your team can pick great partners next time.",
+                        "success",
+                        {"action": "rate_vendor_after_payment", **prompt_vendor_review, "payment_verified": True},
+                    )
+                elif evt:
+                    create_notification(
+                        evt.user_id,
+                        "✅ Payment Verified",
+                        "Funds successfully processed via Stripe.",
+                        "success",
+                        {"payment_verified": True},
+                    )
+                return {
+                    "success": True,
+                    "prompt_user_review_organizer": prompt_user_review_organizer,
+                    "prompt_vendor_review": prompt_vendor_review,
+                }
             else:
                 print(f"❌ Payment ID {payment_id} not found in database")
         except Exception as e:
             print(f"❌ Error updating payment: {str(e)}")
             db.session.rollback()
-    return False
+    return {"success": False, "prompt_user_review_organizer": None, "prompt_vendor_review": None}
 
 def handle_payment_failure(payment_intent):
     if hasattr(payment_intent, 'metadata'):
@@ -271,9 +385,18 @@ def verify_payment_manual(payment_id):
         
         intent = stripe.PaymentIntent.retrieve(pi_id)
         if intent.status == "succeeded":
-            success = handle_payment_success(intent)
-            if success:
-                return jsonify({"status": "verified", "message": "Payment synchronized successfully"}), 200
+            result = handle_payment_success(intent)
+            if result.get("success"):
+                body = {"status": "verified", "message": "Payment synchronized successfully"}
+                if result.get("prompt_user_review_organizer"):
+                    body["prompt_user_review_organizer"] = result["prompt_user_review_organizer"]
+                if result.get("prompt_vendor_review"):
+                    uid = int(get_jwt_identity())
+                    pv = result["prompt_vendor_review"]
+                    ev = Event.query.get(pv.get("event_id"))
+                    if ev and ev.organizer_id == uid:
+                        body["prompt_vendor_review"] = pv
+                return jsonify(body), 200
             else:
                 return jsonify({"status": "error", "message": "Database update failed"}), 500
         else:
@@ -523,11 +646,17 @@ def register_vendor_payment():
         {"event_id": event_id, "payment_id": payment.id},
     )
 
-    return jsonify({
+    out = {
         "message": "Payment registered successfully",
         "payment": payment.to_dict(),
         "remaining_budget": float(event.remaining_budget),
-    }), 201
+    }
+    if payment_type == "final":
+        prompt = _prompt_vendor_review_after_final(event, current_user_id, int(vendor_id))
+        if prompt:
+            out["prompt_vendor_review"] = prompt
+
+    return jsonify(out), 201
 
 
 # --- ORGANIZER PAYMENT REQUESTS (Phase 3) ---

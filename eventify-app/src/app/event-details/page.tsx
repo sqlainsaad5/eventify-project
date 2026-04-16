@@ -32,6 +32,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+
+type RatingSide = { avg: number | null; count: number }
+
 export default function EventDetailsPage() {
     const router = useRouter()
     const [loading, setLoading] = useState(false)
@@ -57,6 +61,35 @@ export default function EventDetailsPage() {
     const [loadingOrganizers, setLoadingOrganizers] = useState(true)
     const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null)
     const [postForApplications, setPostForApplications] = useState(false)
+    const [organizerSummaries, setOrganizerSummaries] = useState<
+        Record<number, { organizer: RatingSide; vendor: RatingSide }>
+    >({})
+
+    const loadOrganizerSummaries = async (orgs: { id: number }[]) => {
+        if (!orgs.length) return
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+        if (!token) return
+        try {
+            const res = await fetch(`${API_BASE}/api/users/rating-summaries`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ user_ids: orgs.map((o) => o.id) }),
+            })
+            if (!res.ok) return
+            const data = await res.json()
+            const summaries = data.summaries || {}
+            const map: Record<number, { organizer: RatingSide; vendor: RatingSide }> = {}
+            for (const key of Object.keys(summaries)) {
+                map[Number(key)] = summaries[key]
+            }
+            setOrganizerSummaries(map)
+        } catch (e) {
+            console.error("rating summaries", e)
+        }
+    }
 
     useEffect(() => {
         const storedUser = localStorage.getItem("user")
@@ -66,10 +99,17 @@ export default function EventDetailsPage() {
         fetchOrganizers()
     }, [])
 
+    useEffect(() => {
+        if (!organizers.length) return
+        loadOrganizerSummaries(organizers)
+        const t = setInterval(() => loadOrganizerSummaries(organizers), 30000)
+        return () => clearInterval(t)
+    }, [organizers])
+
     const fetchOrganizers = async () => {
         try {
             const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-            const res = await fetch("http://localhost:5000/api/auth/organizers", {
+            const res = await fetch(`${API_BASE}/api/auth/organizers`, {
                 headers: { Authorization: `Bearer ${token}` }
             })
             if (res.ok) {
@@ -101,7 +141,7 @@ export default function EventDetailsPage() {
         setLoadingSuggestions(true)
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
         try {
-            const res = await fetch(`http://localhost:5000/api/events/venue-suggestions?q=${encodeURIComponent(query)}`, {
+            const res = await fetch(`${API_BASE}/api/events/venue-suggestions?q=${encodeURIComponent(query)}`, {
                 headers: { Authorization: `Bearer ${token}` }
             })
             if (res.ok) {
@@ -146,7 +186,7 @@ export default function EventDetailsPage() {
         }
 
         try {
-            const response = await fetch("http://localhost:5000/api/events", {
+            const response = await fetch(`${API_BASE}/api/events`, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${token}`
@@ -320,11 +360,22 @@ export default function EventDetailsPage() {
                                             >
                                                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-lg ${selectedOrgId === org.id ? "bg-indigo-600" : "bg-slate-200 group-hover:bg-indigo-400"
                                                     }`}>
-                                                    {org.name[0].toUpperCase()}
+                                                    {(org.name || "?")[0].toUpperCase()}
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className={`font-black tracking-tight truncate ${selectedOrgId === org.id ? "text-indigo-900" : "text-slate-900"}`}>{org.name}</p>
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Verified Industrial Expert</p>
+                                                    <p className={`font-black tracking-tight truncate ${selectedOrgId === org.id ? "text-indigo-900" : "text-slate-900"}`}>{org.name || "Organizer"}</p>
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700/90">
+                                                        {(() => {
+                                                            const cnt = org.host_rating_count ?? 0
+                                                            const avg = org.host_rating_avg
+                                                            if (cnt > 0 && avg != null) {
+                                                                return `${Number(avg).toFixed(1)} ★ average · ${cnt} review${cnt === 1 ? "" : "s"}`
+                                                            }
+                                                            const s = organizerSummaries[org.id]?.organizer
+                                                            if (!s || s.count === 0) return "No host reviews yet"
+                                                            return `${s.avg?.toFixed(1) ?? "—"} ★ average · ${s.count} review${s.count === 1 ? "" : "s"}`
+                                                        })()}
+                                                    </p>
                                                 </div>
                                                 {selectedOrgId === org.id && (
                                                     <CheckCircle className="h-5 w-5 text-indigo-600" />

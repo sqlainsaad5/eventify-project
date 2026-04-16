@@ -23,7 +23,10 @@ import {
 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal"
+import { ReviewDialog } from "@/components/review-dialog"
 import { toast } from "sonner"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 interface Payment {
   id: number
@@ -105,6 +108,18 @@ export default function PaymentsPage() {
   const [organizerSubmitting, setOrganizerSubmitting] = useState(false)
   const [completingEventId, setCompletingEventId] = useState<number | null>(null)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [organizerRatingPrompt, setOrganizerRatingPrompt] = useState<{
+    eventId: number
+    organizerId: number
+    organizerName: string
+    eventName: string
+  } | null>(null)
+  const [vendorRatingPrompt, setVendorRatingPrompt] = useState<{
+    eventId: number
+    vendorId: number
+    vendorName: string
+    eventName: string
+  } | null>(null)
 
   const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
   const getUserId = (): number | null => {
@@ -137,11 +152,11 @@ export default function PaymentsPage() {
     try {
       setLoading(true)
       const [eventsRes, paymentsRes, requestsRes, orgRequestsRes, notificationsRes] = await Promise.all([
-        fetch("http://localhost:5000/api/payments/events-with-payment-status", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:5000/api/payments", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:5000/api/payments/requests", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:5000/api/payments/organizer-requests", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:5000/api/payments/notifications", { headers: { "Authorization": `Bearer ${token}` } })
+        fetch(`${API_BASE}/api/payments/events-with-payment-status`, { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/payments`, { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/payments/requests`, { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/payments/organizer-requests`, { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/payments/notifications`, { headers: { "Authorization": `Bearer ${token}` } })
       ])
 
       if (eventsRes.ok) setEvents(await eventsRes.json())
@@ -181,7 +196,7 @@ export default function PaymentsPage() {
     if (activeTab !== "organizer") return
     const token = getToken()
     if (!token) return
-    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+    fetch(`${API_BASE}/api/payments/notifications/mark-read-by-action`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action: "organizer_payment_followup" }),
@@ -196,7 +211,7 @@ export default function PaymentsPage() {
     if (activeTab !== "requests") return
     const token = getToken()
     if (!token) return
-    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+    fetch(`${API_BASE}/api/payments/notifications/mark-read-by-action`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action: "vendor_payout_request" }),
@@ -215,7 +230,7 @@ export default function PaymentsPage() {
       const body: Record<string, unknown> = { event_id: eventId, amount }
       if (requestId != null) body.request_id = requestId
       if (organizerRequestId != null) body.organizer_request_id = organizerRequestId
-      const res = await fetch("http://localhost:5000/api/payments/create-payment-intent", {
+      const res = await fetch(`${API_BASE}/api/payments/create-payment-intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify(body)
@@ -240,7 +255,7 @@ export default function PaymentsPage() {
     const token = getToken()
     if (!token) return
     try {
-      const res = await fetch(`http://localhost:5000/api/payments/organizer-requests/${id}/reject`, {
+      const res = await fetch(`${API_BASE}/api/payments/organizer-requests/${id}/reject`, {
         method: "PUT",
         headers: { "Authorization": `Bearer ${token}` }
       })
@@ -267,7 +282,7 @@ export default function PaymentsPage() {
     }
     try {
       const eid = parseInt(value, 10)
-      const res = await fetch(`http://localhost:5000/api/events/${eid}/budget-summary`, {
+      const res = await fetch(`${API_BASE}/api/events/${eid}/budget-summary`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (!res.ok) {
@@ -292,7 +307,7 @@ export default function PaymentsPage() {
     setOrganizerSubmitting(true)
     try {
       if (selectedEvent?.organizer_advance_paid === true && selectedEvent?.status === "completed") {
-        const res = await fetch(`http://localhost:5000/api/events/${eid}/create-final-request`, {
+        const res = await fetch(`${API_BASE}/api/events/${eid}/create-final-request`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
         })
@@ -311,7 +326,7 @@ export default function PaymentsPage() {
         }
         return
       }
-      const res = await fetch("http://localhost:5000/api/payments/organizer-request", {
+      const res = await fetch(`${API_BASE}/api/payments/organizer-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({
@@ -343,28 +358,63 @@ export default function PaymentsPage() {
 
   const handleApprove = async (rid: number) => {
     const token = getToken()
-    await fetch(`http://localhost:5000/api/payments/requests/${rid}/approve`, { method: "PUT", headers: { "Authorization": `Bearer ${token}` } })
+    await fetch(`${API_BASE}/api/payments/requests/${rid}/approve`, { method: "PUT", headers: { "Authorization": `Bearer ${token}` } })
     loadData()
   }
 
   const handleReject = async (rid: number) => {
     const token = getToken()
-    await fetch(`http://localhost:5000/api/payments/requests/${rid}/reject`, { method: "PUT", headers: { "Authorization": `Bearer ${token}` } })
+    await fetch(`${API_BASE}/api/payments/requests/${rid}/reject`, { method: "PUT", headers: { "Authorization": `Bearer ${token}` } })
     loadData()
   }
 
   const handleStripeSuccess = async (paymentIntent: any) => {
     const token = getToken()
-    if (currentPaymentId) {
-      await fetch(`http://localhost:5000/api/payments/authorize-verify/${currentPaymentId}`, {
+    let prompt: {
+      event_id: number
+      organizer_id: number
+      organizer_name?: string
+      event_name?: string
+    } | null = null
+    let vendorPrompt: {
+      event_id: number
+      vendor_id: number
+      vendor_name?: string
+      event_name?: string
+    } | null = null
+    if (currentPaymentId && token) {
+      const verifyRes = await fetch(`${API_BASE}/api/payments/authorize-verify/${currentPaymentId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ payment_intent: paymentIntent.id })
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ payment_intent: paymentIntent.id }),
       })
+      const verifyJson = await verifyRes.json().catch(() => ({}))
+      if (verifyRes.ok && verifyJson.prompt_user_review_organizer) {
+        prompt = verifyJson.prompt_user_review_organizer
+      }
+      if (verifyRes.ok && verifyJson.prompt_vendor_review) {
+        vendorPrompt = verifyJson.prompt_vendor_review
+      }
     }
     setIsCheckoutOpen(false)
-    toast.success("Payment received from user")
-    loadData()
+    toast.success("Payment completed")
+    await loadData()
+    if (prompt?.event_id && prompt?.organizer_id) {
+      setOrganizerRatingPrompt({
+        eventId: prompt.event_id,
+        organizerId: prompt.organizer_id,
+        organizerName: prompt.organizer_name || "Organizer",
+        eventName: prompt.event_name || "",
+      })
+    }
+    if (vendorPrompt?.event_id && vendorPrompt?.vendor_id) {
+      setVendorRatingPrompt({
+        eventId: vendorPrompt.event_id,
+        vendorId: vendorPrompt.vendor_id,
+        vendorName: vendorPrompt.vendor_name || "Vendor",
+        eventName: vendorPrompt.event_name || "",
+      })
+    }
   }
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR" }).format(amount)
@@ -689,7 +739,7 @@ export default function PaymentsPage() {
                                         if (!token) return router.push("/login")
                                         try {
                                           const res = await fetch(
-                                            `http://localhost:5000/api/events/${e.id}/create-final-request`,
+                                            `${API_BASE}/api/events/${e.id}/create-final-request`,
                                             {
                                               method: "POST",
                                               headers: {
@@ -724,7 +774,7 @@ export default function PaymentsPage() {
                                         setCompletingEventId(e.id)
                                         try {
                                           const res = await fetch(
-                                            `http://localhost:5000/api/events/${e.id}/complete`,
+                                            `${API_BASE}/api/events/${e.id}/complete`,
                                             {
                                               method: "POST",
                                               headers: { Authorization: `Bearer ${token}` },
@@ -980,6 +1030,101 @@ export default function PaymentsPage() {
           clientSecret={currentClientSecret}
           amount={currentAmount}
           onSuccess={handleStripeSuccess}
+        />
+
+        <ReviewDialog
+          open={organizerRatingPrompt !== null}
+          onOpenChange={(open) => {
+            if (!open) setOrganizerRatingPrompt(null)
+          }}
+          variant="professional"
+          title={
+            organizerRatingPrompt
+              ? `Rate ${organizerRatingPrompt.organizerName}`
+              : "Rate your organizer"
+          }
+          description={
+            organizerRatingPrompt
+              ? `Your final payment for “${organizerRatingPrompt.eventName}” is complete. Your rating helps other hosts choose organizers.`
+              : undefined
+          }
+          onSubmit={async (rating, comment) => {
+            if (!organizerRatingPrompt) return
+            const t = getToken()
+            if (!t) {
+              toast.error("Please sign in again")
+              return
+            }
+            const res = await fetch(
+              `${API_BASE}/api/events/${organizerRatingPrompt.eventId}/reviews`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${t}`,
+                },
+                body: JSON.stringify({
+                  review_type: "user_to_organizer",
+                  subject_id: organizerRatingPrompt.organizerId,
+                  rating,
+                  comment: comment || undefined,
+                }),
+              }
+            )
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+              toast.error(data.error || "Could not submit review")
+              throw new Error(data.error || "submit failed")
+            }
+            toast.success("Thanks — your feedback was saved.")
+            setOrganizerRatingPrompt(null)
+            loadData()
+          }}
+        />
+
+        <ReviewDialog
+          open={vendorRatingPrompt !== null}
+          onOpenChange={(open) => {
+            if (!open) setVendorRatingPrompt(null)
+          }}
+          variant="professional"
+          title={
+            vendorRatingPrompt ? `Rate ${vendorRatingPrompt.vendorName}` : "Rate vendor"
+          }
+          description={
+            vendorRatingPrompt
+              ? `Vendor payout for “${vendorRatingPrompt.eventName}” is complete. Your rating appears on Vendors so you can compare partners for future events.`
+              : undefined
+          }
+          onSubmit={async (rating, comment) => {
+            if (!vendorRatingPrompt) return
+            const t = getToken()
+            if (!t) {
+              toast.error("Please sign in again")
+              return
+            }
+            const res = await fetch(`${API_BASE}/api/events/${vendorRatingPrompt.eventId}/reviews`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${t}`,
+              },
+              body: JSON.stringify({
+                review_type: "organizer_to_vendor",
+                subject_id: vendorRatingPrompt.vendorId,
+                rating,
+                comment: comment || undefined,
+              }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+              toast.error(data.error || "Could not submit review")
+              throw new Error(data.error || "submit failed")
+            }
+            toast.success("Thanks — your feedback was saved.")
+            setVendorRatingPrompt(null)
+            loadData()
+          }}
         />
       </div>
     </DashboardLayout>

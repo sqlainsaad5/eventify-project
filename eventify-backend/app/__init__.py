@@ -164,6 +164,7 @@ def create_app():
     from .api.payments import payments_bp
     from .api.services import services_bp
     from .api.admin import admin_bp
+    from .api.reviews import reviews_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(events_bp)
@@ -172,6 +173,7 @@ def create_app():
     app.register_blueprint(payments_bp)
     app.register_blueprint(services_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(reviews_bp)
 
     @app.route("/")
     def index():
