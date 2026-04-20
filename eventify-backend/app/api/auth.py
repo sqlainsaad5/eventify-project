@@ -317,6 +317,18 @@ def update_profile():
             user.city = data['city']
         if 'category' in data:
             user.category = data['category']
+        if getattr(user, "role", None) == "organizer":
+            if "organizer_availability" in data:
+                av = data.get("organizer_availability")
+                if av in ("available", "limited", "unavailable"):
+                    user.organizer_availability = av
+            if "organizer_package_summary" in data:
+                raw = data.get("organizer_package_summary")
+                if raw is None or raw == "":
+                    user.organizer_package_summary = None
+                else:
+                    s = str(raw).strip()
+                    user.organizer_package_summary = s[:2000] if s else None
             
         db.session.commit()
         
@@ -459,7 +471,15 @@ def get_organizers():
         organizers = User.query.filter_by(role='organizer', is_active=True).all()
         result = []
         for o in organizers:
-            d = o.to_dict()
+            d = {
+                "id": o.id,
+                "name": o.name,
+                "city": o.city,
+                "category": o.category,
+                "profile_image": o.profile_image,
+                "organizer_availability": (getattr(o, "organizer_availability", None) or "available"),
+                "organizer_package_summary": getattr(o, "organizer_package_summary", None),
+            }
             row = (
                 db.session.query(func.avg(Review.rating), func.count(Review.id))
                 .filter(

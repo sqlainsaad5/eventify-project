@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Calendar,
-  DollarSign,
   Users,
   TrendingUp,
   ArrowRight,
@@ -18,6 +17,7 @@ import {
   Loader2,
   Star,
   Shield,
+  Wallet,
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -49,6 +49,7 @@ export default function DashboardPage() {
   const [hostReviewRows, setHostReviewRows] = useState<
     { id: number; rating: number; comment: string | null; created_at: string | null; author_name?: string | null }[]
   >([])
+  const [organizerEarnings, setOrganizerEarnings] = useState(0)
 
   useEffect(() => {
     const savedRole = localStorage.getItem("role")
@@ -112,7 +113,7 @@ export default function DashboardPage() {
       }
 
       // 2. Fetch Events, Payments, Organizer Requests, and Vendors
-      const [eventsRes, paymentsRes, organizerRequestsRes, vendorsRes] = await Promise.all([
+      const [eventsRes, paymentsRes, organizerRequestsRes, vendorsRes, earningsRes] = await Promise.all([
         fetch(`${API_BASE}/api/events`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
@@ -124,7 +125,10 @@ export default function DashboardPage() {
         }),
         fetch(`${API_BASE}/api/vendors`, {
           headers: { Authorization: `Bearer ${token}` }
-        })
+        }),
+        fetch(`${API_BASE}/api/payments/organizer-earnings`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
       ])
 
       const eventsData = await eventsRes.json()
@@ -161,6 +165,17 @@ export default function DashboardPage() {
         setOrganizerRequests(organizerRequestsData.organizer_requests || [])
       }
 
+      if (earningsRes.ok) {
+        try {
+          const earningsData = await earningsRes.json()
+          setOrganizerEarnings(Number(earningsData.total_earnings) || 0)
+        } catch {
+          setOrganizerEarnings(0)
+        }
+      } else {
+        setOrganizerEarnings(0)
+      }
+
       if (vendorsRes.ok && Array.isArray(vendorsData)) {
         setVendors(vendorsData)
       } else {
@@ -179,7 +194,6 @@ export default function DashboardPage() {
   const eventList = Array.isArray(events) ? events : []
   const paymentRequestList = Array.isArray(paymentRequests) ? paymentRequests : []
 
-  const totalBudget = eventList.reduce((sum, e) => sum + (Number(e?.budget) || 0), 0)
   const pendingRequests = paymentRequestList.filter(r => r?.status === "pending").length
   const totalVendors = Array.isArray(vendors) ? vendors.length : 0
 
@@ -255,12 +269,18 @@ export default function DashboardPage() {
             href="/dashboard/payments"
           />
           <StatCard
-            title="Total Budget"
-            value={`$${(totalBudget / 1000).toFixed(1)}k`}
-            trend="Organized capital"
-            icon={<DollarSign className="h-5 w-5 text-amber-600" />}
+            title="Total earnings"
+            value={
+              organizerEarnings >= 1_000_000
+                ? `Rs. ${(organizerEarnings / 1_000_000).toFixed(2)}M`
+                : organizerEarnings >= 1000
+                  ? `Rs. ${(organizerEarnings / 1000).toFixed(1)}k`
+                  : `Rs. ${Math.round(organizerEarnings).toLocaleString()}`
+            }
+            trend="Organizer fees received"
+            icon={<Wallet className="h-5 w-5 text-amber-600" />}
             bgColor="bg-amber-50"
-            href="/my-events/budget"
+            href="/dashboard/payments"
           />
         </div>
 
@@ -301,45 +321,47 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
-            <CardContent className="flex-1 p-6 md:p-8">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4">Recent host feedback</h3>
+            <CardContent className="flex-1 p-6 md:p-8 min-h-0 flex flex-col">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 shrink-0">Recent host feedback</h3>
               {hostReviewRows.length === 0 ? (
                 <p className="text-slate-500 text-sm font-medium py-4">No client ratings yet.</p>
               ) : (
-                <ul className="space-y-4">
-                  {hostReviewRows.map((rev) => (
-                    <li
-                      key={rev.id}
-                      className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 flex flex-col gap-2"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-1">
-                          {[1, 2, 3, 4, 5].map((n) => (
-                            <Star
-                              key={n}
-                              className={`h-4 w-4 ${n <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
-                            />
-                          ))}
+                <div className="max-h-[min(22rem,50vh)] overflow-y-auto overscroll-y-contain pr-2 -mr-1 [scrollbar-gutter:stable]">
+                  <ul className="space-y-4 pb-1">
+                    {hostReviewRows.map((rev) => (
+                      <li
+                        key={rev.id}
+                        className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 flex flex-col gap-2"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((n) => (
+                              <Star
+                                key={n}
+                                className={`h-4 w-4 ${n <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                              />
+                            ))}
+                          </div>
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 shrink-0">
+                            {rev.created_at
+                              ? new Date(rev.created_at).toLocaleDateString(undefined, {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })
+                              : ""}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 shrink-0">
-                          {rev.created_at
-                            ? new Date(rev.created_at).toLocaleDateString(undefined, {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })
-                            : ""}
-                        </span>
-                      </div>
-                      <p className="text-xs font-bold text-slate-500">
-                        From host{rev.author_name ? `: ${rev.author_name}` : ""}
-                      </p>
-                      {rev.comment ? (
-                        <p className="text-sm text-slate-700 leading-relaxed font-medium">{rev.comment}</p>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
+                        <p className="text-xs font-bold text-slate-500">
+                          From host{rev.author_name ? `: ${rev.author_name}` : ""}
+                        </p>
+                        {rev.comment ? (
+                          <p className="text-sm text-slate-700 leading-relaxed font-medium">{rev.comment}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </CardContent>
           </div>

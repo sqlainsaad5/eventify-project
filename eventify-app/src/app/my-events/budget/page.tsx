@@ -17,6 +17,9 @@ import {
   Clock,
   Sparkles,
   ArrowLeft,
+  LayoutList,
+  PieChart,
+  Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -31,6 +34,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -66,15 +70,72 @@ function formatDate(iso?: string | null) {
   }
 }
 
+type BudgetPlanRow = {
+  id?: number
+  label: string
+  allocated_amount: number
+  notes?: string
+}
+
+type BudgetPlanSummary = {
+  items: BudgetPlanRow[]
+  total_allocated: number
+  unallocated: number
+}
+
+const PLAN_TEMPLATES: Record<string, { label: string; pct: number }[]> = {
+  wedding: [
+    { label: "Venue & rentals", pct: 0.3 },
+    { label: "Catering & cake", pct: 0.24 },
+    { label: "Photo & video", pct: 0.12 },
+    { label: "Attire & beauty", pct: 0.1 },
+    { label: "Decor & flowers", pct: 0.1 },
+    { label: "Music & entertainment", pct: 0.08 },
+    { label: "Contingency", pct: 0.06 },
+  ],
+  corporate: [
+    { label: "Venue & AV", pct: 0.35 },
+    { label: "Catering", pct: 0.2 },
+    { label: "Speakers & content", pct: 0.15 },
+    { label: "Branding & signage", pct: 0.12 },
+    { label: "Logistics & staff", pct: 0.1 },
+    { label: "Contingency", pct: 0.08 },
+  ],
+  party: [
+    { label: "Venue", pct: 0.28 },
+    { label: "Food & drinks", pct: 0.26 },
+    { label: "Decor", pct: 0.18 },
+    { label: "Entertainment", pct: 0.16 },
+    { label: "Misc & contingency", pct: 0.12 },
+  ],
+}
+
+function buildTemplateRows(templateKey: string, totalBudget: number): BudgetPlanRow[] {
+  const rows = PLAN_TEMPLATES[templateKey]
+  if (!rows || totalBudget <= 0) return []
+  let allocated = 0
+  return rows.map((r, i) => {
+    const amt =
+      i === rows.length - 1
+        ? Math.max(0, Math.round(totalBudget - allocated))
+        : Math.round(totalBudget * r.pct)
+    allocated += amt
+    return { label: r.label, allocated_amount: amt, notes: "" }
+  })
+}
+
 export default function BudgetPage() {
   const [events, setEvents] = useState<{ id: number; name: string; date: string; total_spent?: number }[]>([])
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
   const [summary, setSummary] = useState<{
     event_id: number
     event_name: string
+    event_owner_id?: number
+    organizer_id?: number | null
     total_budget: number
     total_spent: number
     remaining_budget: number
+    budget_plan?: BudgetPlanSummary
     vendor_agreements: Array<{
       id: number
       vendor_id: number
@@ -122,7 +183,11 @@ export default function BudgetPage() {
   const [deletingAgreement, setDeletingAgreement] = useState(false)
   const [editPriceStr, setEditPriceStr] = useState("")
   const [editServiceStr, setEditServiceStr] = useState("")
+  const [planDialogOpen, setPlanDialogOpen] = useState(false)
+  const [planDraft, setPlanDraft] = useState<BudgetPlanRow[]>([])
+  const [savingPlan, setSavingPlan] = useState(false)
   const historyRef = useRef<HTMLDivElement>(null)
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null)
 
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
   const [role, setRole] = useState<string | null>(null)
@@ -132,6 +197,11 @@ export default function BudgetPage() {
       try {
         const storedRole = localStorage.getItem("role")
         if (storedRole) setRole(storedRole)
+        const raw = localStorage.getItem("user")
+        if (raw) {
+          const u = JSON.parse(raw) as { id?: number | string }
+          if (u?.id != null && u.id !== "") setCurrentUserId(Number(u.id))
+        }
       } catch {
         // ignore
       }
@@ -271,6 +341,62 @@ export default function BudgetPage() {
     if (!summary) return
     const total = summary.vendor_agreements.reduce((s, a) => s + a.agreed_price, 0)
     setBudgetInput(String(total))
+  }
+
+  const openPlanEditor = () => {
+    if (!summary) return
+    const items = summary.budget_plan?.items?.length
+      ? summary.budget_plan.items.map((i) => ({
+          id: i.id,
+          label: i.label,
+          allocated_amount: i.allocated_amount,
+          notes: i.notes || "",
+        }))
+      : [{ label: "", allocated_amount: 0, notes: "" }]
+    setPlanDraft(items)
+    setPlanDialogOpen(true)
+  }
+
+  const handleApplyTemplate = (key: string) => {
+    if (!summary || summary.total_budget <= 0) {
+      toast.error("Set a positive total budget first (use Set Budget below).")
+      return
+    }
+    const rows = buildTemplateRows(key, summary.total_budget)
+    if (!rows.length) return
+    setPlanDraft(rows)
+    toast.success("Template applied — edit rows, then save.")
+  }
+
+  const handleSavePlan = async () => {
+    if (!selectedEventId) return
+    const items = planDraft
+      .filter((r) => r.label.trim())
+      .map((r) => ({
+        label: r.label.trim(),
+        allocated_amount: Number.isFinite(r.allocated_amount) ? r.allocated_amount : 0,
+        notes: (r.notes || "").trim() || undefined,
+      }))
+    setSavingPlan(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/events/${selectedEventId}/budget-plan`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ items }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success("Budget plan saved")
+        setPlanDialogOpen(false)
+        fetchSummary()
+      } else {
+        toast.error(data.error || "Could not save plan")
+      }
+    } catch {
+      toast.error("Could not save plan")
+    } finally {
+      setSavingPlan(false)
+    }
   }
 
   const openPaymentModal = (vendorId: number, vendorName: string, type: "advance" | "final", agreedPrice: number) => {
@@ -451,6 +577,12 @@ export default function BudgetPage() {
   const pendingAdvanceCount = summary?.vendor_agreements.filter((a) => a.advance_status === "pending").length ?? 0
 
   const isOrganizer = role === "organizer"
+  const isEventOwner =
+    summary != null &&
+    currentUserId != null &&
+    Number(summary.event_owner_id) === Number(currentUserId)
+  /** API allows both owner and assigned organizer to PATCH /budget and PUT /budget-plan */
+  const canEditEventBudget = isOrganizer || isEventOwner
 
   const myEventsShell = (
     <>
@@ -490,7 +622,9 @@ export default function BudgetPage() {
       >
         <div className="relative z-10 container mx-auto px-6">
           <h1 className="text-3xl md:text-4xl font-black tracking-tighter mb-2">Budget Planner</h1>
-          <p className="text-white/80 font-medium">Manage event budgets, vendor payments, and track spending.</p>
+          <p className="text-white/80 font-medium max-w-2xl mx-auto">
+            Set your total budget, build a category-by-category plan, then track spending against it.
+          </p>
         </div>
       </div>
     </>
@@ -575,33 +709,161 @@ export default function BudgetPage() {
               </div>
             ) : summary ? (
               <>
-                {/* Budget Alerts */}
-                {isOverBudget && (
-                  <Alert variant="destructive" className="rounded-xl">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      You have exceeded your budget by {formatRs(Math.abs(summary.remaining_budget))}!
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {!isOverBudget && summary.remaining_budget >= 0 && (
-                  <Alert className="rounded-xl border-emerald-200 bg-emerald-50 text-emerald-800">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    <AlertDescription>
-                      Budget status: {Math.round(100 - usagePercent)}% remaining — You&apos;re on track!
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {pendingAdvanceCount > 0 && (
-                  <Alert className="rounded-xl border-amber-200 bg-amber-50">
-                    <Clock className="h-4 w-4 text-amber-600" />
-                    <AlertDescription>
-                      Reminder: Advance payment pending for {pendingAdvanceCount} vendor{pendingAdvanceCount > 1 ? "s" : ""}
-                    </AlertDescription>
-                  </Alert>
+                {/* 1) Total budget — owners & organizers (API allows both) */}
+                {canEditEventBudget && (
+                  <Card className="border-slate-200/60 rounded-2xl border-indigo-200/80 shadow-md shadow-indigo-100/40">
+                    <CardHeader>
+                      <CardTitle>Step 1 — Total event budget</CardTitle>
+                      <CardDescription>
+                        Set how much you plan to spend in total. You need this before templates split amounts across
+                        categories.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex flex-wrap gap-4 items-end">
+                        <div className="flex-1 min-w-[200px]">
+                          <Label>Total Budget (Rs.)</Label>
+                          <Input
+                            type="number"
+                            value={budgetInput}
+                            onChange={(e) => setBudgetInput(e.target.value)}
+                            placeholder="200000"
+                            className="mt-1"
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAutoCalcBudget}
+                          className="shrink-0"
+                        >
+                          Auto from vendor costs
+                        </Button>
+                        <Button onClick={handleSaveBudget} disabled={savingBudget} className="shrink-0 bg-indigo-600 hover:bg-indigo-700">
+                          {savingBudget ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                          Save total budget
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
 
-                {/* Budget Overview Cards */}
+                {/* 2) Planned allocation (real budget plan, persisted) */}
+                <Card className="border-slate-200/60 rounded-2xl border-indigo-100/80 bg-gradient-to-br from-white to-indigo-50/40 ring-1 ring-indigo-100/60">
+                  <CardHeader>
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                          <PieChart className="h-5 w-5 text-indigo-600 shrink-0" />
+                          Step 2 — Budget allocation plan
+                        </CardTitle>
+                        <CardDescription>
+                          Build and save a real plan: categories (venue, catering, etc.) with planned amounts. This is stored
+                          for the event — spending below still reflects actual vendor payments.
+                        </CardDescription>
+                      </div>
+                      <Button type="button" onClick={openPlanEditor} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 shrink-0">
+                        <LayoutList className="h-4 w-4 mr-2" />
+                        {summary.budget_plan?.items?.length ? "Edit plan" : "Create plan"}
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {!summary.budget_plan?.items?.length ? (
+                      <div className="space-y-4">
+                        <p className="text-sm text-slate-600 leading-relaxed">
+                          No saved plan yet. Click{" "}
+                          <span className="font-bold text-indigo-700">Create plan</span> to open the editor, add rows, or apply a
+                          template (wedding / corporate / party). Plans are saved to your event when you click{" "}
+                          <span className="font-bold">Save plan</span>.
+                        </p>
+                        {summary.total_budget <= 0 && canEditEventBudget && (
+                          <p className="text-sm font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                            Set a positive total budget in Step 1 first — templates divide that amount across categories.
+                          </p>
+                        )}
+                        <Button type="button" onClick={openPlanEditor} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 w-full sm:w-auto">
+                          <LayoutList className="h-4 w-4 mr-2" />
+                          Open budget plan editor
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-6 text-sm">
+                          <div>
+                            <span className="text-slate-500">Planned in categories </span>
+                            <span className="font-black text-indigo-700 tabular-nums">
+                              {formatRs(summary.budget_plan.total_allocated)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Unassigned to categories </span>
+                            <span
+                              className={`font-black tabular-nums ${
+                                summary.budget_plan.unallocated < -0.5 ? "text-red-600" : "text-slate-900"
+                              }`}
+                            >
+                              {formatRs(summary.budget_plan.unallocated)}
+                            </span>
+                            {summary.budget_plan.unallocated < -0.5 && (
+                              <span className="text-xs text-amber-700 ml-2">(plan exceeds total budget)</span>
+                            )}
+                          </div>
+                        </div>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Category</TableHead>
+                              <TableHead className="text-right">Planned</TableHead>
+                              <TableHead className="hidden md:table-cell">Notes</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {summary.budget_plan.items.map((row, idx) => (
+                              <TableRow key={row.id ?? `plan-${idx}-${row.label}`}>
+                                <TableCell className="font-medium">{row.label}</TableCell>
+                                <TableCell className="text-right tabular-nums">{formatRs(row.allocated_amount)}</TableCell>
+                                <TableCell className="hidden md:table-cell text-slate-500 text-sm max-w-[240px] truncate">
+                                  {row.notes || "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Spending status (actuals vs total) */}
+                <div className="space-y-4">
+                  <h2 className="text-sm font-black uppercase tracking-widest text-slate-400">Expense status</h2>
+                  {isOverBudget && (
+                    <Alert variant="destructive" className="rounded-xl">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        You have exceeded your budget by {formatRs(Math.abs(summary.remaining_budget))}!
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {!isOverBudget && summary.remaining_budget >= 0 && (
+                    <Alert className="rounded-xl border-emerald-200 bg-emerald-50 text-emerald-800">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <AlertDescription>
+                        Budget status: {Math.round(100 - usagePercent)}% remaining — You&apos;re on track!
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {pendingAdvanceCount > 0 && (
+                    <Alert className="rounded-xl border-amber-200 bg-amber-50">
+                      <Clock className="h-4 w-4 text-amber-600" />
+                      <AlertDescription>
+                        Reminder: Advance payment pending for {pendingAdvanceCount} vendor{pendingAdvanceCount > 1 ? "s" : ""}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+
                 <div className="grid md:grid-cols-3 gap-6">
                   <Card className="bg-white border-slate-200/60 rounded-2xl">
                     <CardContent className="p-6">
@@ -636,42 +898,6 @@ export default function BudgetPage() {
                     indicatorClassName={usagePercent > 100 ? "bg-red-500" : usagePercent > 75 ? "bg-amber-500" : "bg-emerald-500"}
                   />
                 </div>
-
-                {/* Set/Edit Budget (organizer only) */}
-                {isOrganizer && (
-                  <Card className="border-slate-200/60 rounded-2xl">
-                    <CardHeader>
-                      <CardTitle>Set Budget</CardTitle>
-                      <CardDescription>Update the total budget for this event</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex flex-wrap gap-4 items-end">
-                        <div className="flex-1 min-w-[200px]">
-                          <Label>Total Budget (Rs.)</Label>
-                          <Input
-                            type="number"
-                            value={budgetInput}
-                            onChange={(e) => setBudgetInput(e.target.value)}
-                            placeholder="200000"
-                            className="mt-1"
-                          />
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleAutoCalcBudget}
-                          className="shrink-0"
-                        >
-                          Auto from vendor costs
-                        </Button>
-                        <Button onClick={handleSaveBudget} disabled={savingBudget} className="shrink-0">
-                          {savingBudget ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                          Save Budget
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {/* Vendor Payment Table (organizer only) */}
                 {isOrganizer && (
@@ -983,6 +1209,125 @@ export default function BudgetPage() {
             </DialogContent>
           </Dialog>
         )}
+
+        <Dialog open={planDialogOpen} onOpenChange={setPlanDialogOpen}>
+          <DialogContent className="sm:max-w-2xl max-h-[min(90vh,720px)] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Budget plan</DialogTitle>
+              <DialogDescription>
+                Divide your total budget into categories. Total event budget:{" "}
+                <span className="font-semibold text-foreground">{summary ? formatRs(summary.total_budget) : "—"}</span>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <p className="text-xs font-black uppercase tracking-wider text-slate-400">Templates (fill from total budget)</p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => handleApplyTemplate("wedding")}>
+                  Wedding
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => handleApplyTemplate("corporate")}>
+                  Corporate
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => handleApplyTemplate("party")}>
+                  Party
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-xl text-slate-500"
+                  onClick={() => setPlanDraft([{ label: "", allocated_amount: 0, notes: "" }])}
+                >
+                  Clear to blank row
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-3 pt-2">
+              {planDraft.map((row, idx) => (
+                <div
+                  key={`draft-${idx}`}
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:gap-2 items-end border border-slate-100 rounded-2xl p-3 bg-slate-50/80"
+                >
+                  <div className="sm:col-span-5 space-y-1">
+                    <Label className="text-xs">Category</Label>
+                    <Input
+                      value={row.label}
+                      placeholder="e.g. Venue"
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setPlanDraft((d) => d.map((x, i) => (i === idx ? { ...x, label: v } : x)))
+                      }}
+                    />
+                  </div>
+                  <div className="sm:col-span-3 space-y-1">
+                    <Label className="text-xs">Planned (Rs.)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={row.allocated_amount === 0 ? "" : row.allocated_amount}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        const n = raw === "" ? 0 : parseFloat(raw)
+                        setPlanDraft((d) =>
+                          d.map((x, i) => (i === idx ? { ...x, allocated_amount: Number.isFinite(n) ? n : 0 } : x))
+                        )
+                      }}
+                    />
+                  </div>
+                  <div className="sm:col-span-3 space-y-1">
+                    <Label className="text-xs">Notes</Label>
+                    <Input
+                      value={row.notes || ""}
+                      placeholder="Optional"
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setPlanDraft((d) => d.map((x, i) => (i === idx ? { ...x, notes: v } : x)))
+                      }}
+                    />
+                  </div>
+                  <div className="sm:col-span-1 flex justify-end pb-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+                      onClick={() => setPlanDraft((d) => d.filter((_, i) => i !== idx))}
+                      disabled={planDraft.length === 0}
+                      aria-label="Remove row"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full rounded-xl border-dashed"
+              onClick={() => setPlanDraft((d) => [...d, { label: "", allocated_amount: 0, notes: "" }])}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add category
+            </Button>
+            <p className="text-sm text-slate-600">
+              Draft total:{" "}
+              <span className="font-black text-indigo-700 tabular-nums">
+                {formatRs(planDraft.reduce((s, r) => s + (Number.isFinite(r.allocated_amount) ? r.allocated_amount : 0), 0))}
+              </span>
+            </p>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setPlanDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" className="rounded-xl bg-indigo-600 hover:bg-indigo-700" onClick={handleSavePlan} disabled={savingPlan}>
+                {savingPlan ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save plan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <ReviewDialog
           open={vendorRatingPrompt !== null}

@@ -31,6 +31,9 @@ class User(db.Model):
     phone = db.Column(db.String(50))
     category = db.Column(db.String(100))
     profile_image = db.Column(db.Text)
+    # Shown to hosts on the create-event organizer picker (organizer role only)
+    organizer_availability = db.Column(db.String(32))  # available | limited | unavailable
+    organizer_package_summary = db.Column(db.Text)
     is_verified = db.Column(db.Boolean, default=False)  # ✅ NEW
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
@@ -81,6 +84,8 @@ class User(db.Model):
             "phone": self.phone,
             "category": self.category,
             "profile_image": self.profile_image,
+            "organizer_availability": self.organizer_availability,
+            "organizer_package_summary": self.organizer_package_summary,
             "is_verified": self.is_verified,  # ✅ include in API responses
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -235,6 +240,32 @@ class EventVendorAgreement(db.Model):
             "service_type": self.service_type,
             "payment_status": self.payment_status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class BudgetPlanItem(db.Model):
+    """Planned allocation by category for an event (host/organizer budget planner)."""
+
+    __tablename__ = "budget_plan_item"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    allocated_amount = db.Column(db.Float, nullable=False, default=0.0)
+    notes = db.Column(db.Text, nullable=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+    event = db.relationship("Event", backref=db.backref("budget_plan_items", lazy="dynamic"))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "label": self.label,
+            "allocated_amount": float(self.allocated_amount or 0),
+            "notes": self.notes,
+            "sort_order": self.sort_order,
         }
 
 

@@ -1,11 +1,12 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
 from app.extensions import db
-from app.models import Event, User, EventVendorAgreement, Payment, EventApplication
+from app.models import Event, User, EventVendorAgreement, Payment, EventApplication, BudgetPlanItem
 import os
 import uuid
 from collections import defaultdict
+import requests
 from openai import OpenAI
 
 events_bp = Blueprint("events", __name__, url_prefix="/api/events")
@@ -545,41 +546,122 @@ def delete_event(event_id):
         print(f"❌ Error deleting event: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-# ✅ Get venue suggestions (Dynamic)
+def _nominatim_venue_search(query: str, limit: int = 10) -> list:
+    """OpenStreetMap Nominatim forward search (addresses, venues, cities worldwide)."""
+    try:
+        ua = current_app.config.get(
+            "NOMINATIM_USER_AGENT",
+            "Eventify/1.0 (venue search)",
+        )
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": query,
+                "format": "json",
+                "limit": limit,
+                "addressdetails": 0,
+            },
+            headers={
+                "User-Agent": ua,
+                "Accept-Language": "en",
+            },
+            timeout=12,
+        )
+        r.raise_for_status()
+        data = r.json()
+        rows = data if isinstance(data, list) else []
+        out = []
+        for item in rows:
+            name = item.get("display_name")
+            if name and name not in out:
+                out.append(name)
+        return out
+    except Exception as e:
+        print(f"Nominatim venue search: {e}")
+        return []
+
+
+# ✅ Venue suggestions: your past venues + OSM autocomplete + curated regional list
 @events_bp.route("/venue-suggestions", methods=["GET"])
 @jwt_required()
 def get_venue_suggestions():
     try:
-        query = request.args.get('q', '').lower().strip()
-        
-        if len(query) < 2:
+        q = request.args.get("q", "").strip()
+        q_lower = q.lower()
+
+        if len(q) < 2:
             return jsonify({"suggestions": []})
-        
-        # Sample venues database (you can expand this later)
+
+        seen = set()
+        suggestions = []
+
+        def add_label(label: str) -> None:
+            label = (label or "").strip()
+            if not label:
+                return
+            key = label.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            suggestions.append(label)
+
+        # 1) Venues already used in this database (user's org / app history)
+        try:
+            rows = (
+                db.session.query(Event.venue)
+                .filter(func.lower(Event.venue).contains(q_lower))
+                .distinct()
+                .limit(8)
+                .all()
+            )
+            for (venue,) in rows:
+                add_label(venue)
+        except Exception as e:
+            print(f"venue DB suggestions: {e}")
+
+        # 2) Live place & address autocomplete (OpenStreetMap)
+        for label in _nominatim_venue_search(q, limit=10):
+            add_label(label)
+            if len(suggestions) >= 15:
+                return jsonify({"suggestions": suggestions[:15]})
+
+        # 3) Curated regional venues when useful (offline-friendly extras)
         pakistani_venues = [
-            "Expo Center Lahore", "Pearl Continental Hotel Karachi", 
-            "Serena Hotel Islamabad", "Lahore Expo Centre", 
-            "Karachi Expo Center", "Punjab Stadium Lahore",
-            "National Stadium Karachi", "Jinnah Convention Center Islamabad",
-            "Alhamra Arts Council Lahore", "Frere Hall Karachi", 
-            "PC Hotel Lahore", "Marriott Hotel Islamabad", 
-            "Avari Hotel Lahore", "Mövenpick Hotel Karachi",
-            "Royal Palm Golf Club Lahore", "Beach Luxury Hotel Karachi", 
-            "Islamabad Club", "Lahore Gymkhana", "Karachi Golf Club",
-            "PAF Museum Karachi", "Lahore Museum", 
+            "Expo Center Lahore",
+            "Pearl Continental Hotel Karachi",
+            "Serena Hotel Islamabad",
+            "Lahore Expo Centre",
+            "Karachi Expo Center",
+            "Punjab Stadium Lahore",
+            "National Stadium Karachi",
+            "Jinnah Convention Center Islamabad",
+            "Alhamra Arts Council Lahore",
+            "Frere Hall Karachi",
+            "PC Hotel Lahore",
+            "Marriott Hotel Islamabad",
+            "Avari Hotel Lahore",
+            "Mövenpick Hotel Karachi",
+            "Royal Palm Golf Club Lahore",
+            "Beach Luxury Hotel Karachi",
+            "Islamabad Club",
+            "Lahore Gymkhana",
+            "Karachi Golf Club",
+            "PAF Museum Karachi",
+            "Lahore Museum",
             "Pakistan National Council of Arts Islamabad",
-            "Convention Center Peshawar", "Bacha Khan Center Peshawar"
+            "Convention Center Peshawar",
+            "Bacha Khan Center Peshawar",
         ]
-        
-        # Filter venues based on query
-        suggestions = [venue for venue in pakistani_venues if query in venue.lower()]
-        
-        return jsonify({
-            "suggestions": suggestions[:10]  # Return top 10 results
-        })
+        for venue in pakistani_venues:
+            if q_lower in venue.lower():
+                add_label(venue)
+            if len(suggestions) >= 15:
+                break
+
+        return jsonify({"suggestions": suggestions[:15]})
 
     except Exception as e:
-        print(f"❌ Error in venue suggestions: {e}")
+        print(f"Error in venue suggestions: {e}")
         return jsonify({"suggestions": []})
 
 # ✅ Respond to an organizer assignment (Accept/Reject)
@@ -891,6 +973,20 @@ def _get_event_for_budget(event_id, user_id):
     ).first()
 
 
+def _budget_plan_payload(event_id: int, total_budget: float) -> dict:
+    rows = (
+        BudgetPlanItem.query.filter_by(event_id=event_id)
+        .order_by(BudgetPlanItem.sort_order, BudgetPlanItem.id)
+        .all()
+    )
+    plan_total = float(sum((p.allocated_amount or 0) for p in rows))
+    return {
+        "items": [p.to_dict() for p in rows],
+        "total_allocated": round(plan_total, 2),
+        "unallocated": round(float(total_budget or 0) - plan_total, 2),
+    }
+
+
 @events_bp.route("/<int:event_id>/budget-summary", methods=["GET"])
 @jwt_required()
 def get_budget_summary(event_id):
@@ -953,12 +1049,65 @@ def get_budget_summary(event_id):
     return jsonify({
         "event_id": event_id,
         "event_name": event.name,
+        "event_owner_id": event.user_id,
+        "organizer_id": event.organizer_id,
         "total_budget": total_budget,
         "total_spent": total_spent,
         "remaining_budget": remaining_budget,
         "vendor_agreements": vendor_agreements,
         "assigned_vendors_without_agreement": assigned_without_agreement,
+        "budget_plan": _budget_plan_payload(event_id, total_budget),
     }), 200
+
+
+@events_bp.route("/<int:event_id>/budget-plan", methods=["PUT"])
+@jwt_required()
+def put_budget_plan(event_id):
+    """Replace budget plan line items (category + planned amount). Body: { items: [{ label, allocated_amount, notes? }] }"""
+    user_id = get_jwt_identity()
+    event = _get_event_for_budget(event_id, user_id)
+    if not event:
+        return jsonify({"error": "Event not found or unauthorized"}), 404
+
+    data = request.get_json() or {}
+    items = data.get("items")
+    if not isinstance(items, list):
+        return jsonify({"error": "items must be an array"}), 400
+
+    try:
+        BudgetPlanItem.query.filter_by(event_id=event_id).delete()
+        for idx, row in enumerate(items):
+            if not isinstance(row, dict):
+                continue
+            label = (row.get("label") or "").strip()
+            if not label:
+                continue
+            try:
+                amt = float(row.get("allocated_amount", 0))
+            except (TypeError, ValueError):
+                return jsonify({"error": f"Invalid amount for row {idx + 1}"}), 400
+            if amt < 0:
+                return jsonify({"error": "allocated_amount must be non-negative"}), 400
+            notes = row.get("notes")
+            if notes is not None:
+                notes = str(notes).strip()[:2000] or None
+            db.session.add(
+                BudgetPlanItem(
+                    event_id=event_id,
+                    label=label[:120],
+                    allocated_amount=amt,
+                    notes=notes,
+                    sort_order=idx,
+                )
+            )
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"put_budget_plan: {e}")
+        return jsonify({"error": "Could not save budget plan"}), 500
+
+    total_budget = float(event.budget or 0)
+    return jsonify({"message": "Budget plan saved", "budget_plan": _budget_plan_payload(event_id, total_budget)}), 200
 
 
 @events_bp.route("/<int:event_id>/budget", methods=["PATCH"])

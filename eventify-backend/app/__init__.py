@@ -1,6 +1,5 @@
 # app/__init__.py - WITH TEMPORARY DATA STORAGE
-from urllib import response
-from flask import Flask, app, jsonify, request
+from flask import Flask, jsonify, request
 from .config import Config
 from .extensions import db, migrate, jwt , mail
 from flask_cors import CORS
@@ -30,6 +29,11 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
     mail.init_app(app)
+
+    from .schema_patches import ensure_budget_plan_table, ensure_user_organizer_columns
+
+    ensure_user_organizer_columns(app)
+    ensure_budget_plan_table(app)
 
     # ✅ Smart CORS configuration
     def dynamic_origin(origin):

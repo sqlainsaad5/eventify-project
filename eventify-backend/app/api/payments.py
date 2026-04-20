@@ -11,7 +11,7 @@ from app.models import (
     EventVendorAgreement,
     Review,
 )
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 from datetime import datetime
 import stripe
 from app.config import Config
@@ -414,6 +414,37 @@ def get_payment_requests():
         or_(Event.user_id == user_id, Event.organizer_id == user_id)
     ).all()
     return jsonify({"requests": [r.to_dict() for r in requests]}), 200
+
+
+@payments_bp.route("/organizer-earnings", methods=["GET"])
+@jwt_required()
+def get_organizer_earnings():
+    """
+    Total completed organizer fee payments (25% advance + 75% final) across all events
+    where the current user is the assigned organizer.
+    """
+    user_id = int(get_jwt_identity())
+    try:
+        total = (
+            db.session.query(func.coalesce(func.sum(Payment.amount), 0.0))
+            .join(Event, Event.id == Payment.event_id)
+            .filter(
+                Event.organizer_id == user_id,
+                Payment.status == "completed",
+                Payment.payment_type.in_(["organizer_advance", "organizer_final"]),
+            )
+            .scalar()
+        )
+        return jsonify(
+            {
+                "total_earnings": round(float(total or 0), 2),
+                "currency": "PKR",
+            }
+        ), 200
+    except Exception as e:
+        print(f"organizer-earnings: {e}")
+        return jsonify({"total_earnings": 0.0, "currency": "PKR"}), 200
+
 
 @payments_bp.route("/events-with-payment-status", methods=["GET"])
 @jwt_required()

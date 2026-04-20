@@ -26,3 +26,8 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
     MAIL_DEFAULT_SENDER = ('Eventify', os.getenv("MAIL_USERNAME"))
     UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'static', 'uploads')
+    # Required by Nominatim usage policy — set a real contact URL or email in production
+    NOMINATIM_USER_AGENT = os.getenv(
+        "NOMINATIM_USER_AGENT",
+        "Eventify/1.0 (venue search; https://github.com/)",
+    )

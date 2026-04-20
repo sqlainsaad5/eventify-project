@@ -8,6 +8,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { User, Mail, Phone, MapPin, LogOut, Camera } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 interface UserData {
   id: string;
@@ -18,6 +26,8 @@ interface UserData {
   role: string;
   category: string;
   profile_image?: string;
+  organizer_availability?: string | null;
+  organizer_package_summary?: string | null;
 }
 
 export default function OrganizerProfilePage() {
@@ -33,7 +43,9 @@ export default function OrganizerProfilePage() {
     city: "",
     role: "",
     category: "",
-    profile_image: ""
+    profile_image: "",
+    organizer_availability: "available",
+    organizer_package_summary: ""
   })
   const [uploading, setUploading] = useState(false)
 
@@ -163,7 +175,13 @@ export default function OrganizerProfilePage() {
           name: userData.name,
           phone: userData.phone,
           city: userData.city,
-          category: userData.category
+          category: userData.category,
+          ...(userData.role === "organizer"
+            ? {
+                organizer_availability: userData.organizer_availability || "available",
+                organizer_package_summary: userData.organizer_package_summary || "",
+              }
+            : {}),
         })
       })
 
@@ -370,6 +388,49 @@ export default function OrganizerProfilePage() {
                     placeholder="Add category"
                   />
                 </div>
+              )}
+
+              {userData.role === "organizer" && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-card-foreground">Availability (shown to hosts)</Label>
+                    <Select
+                      value={userData.organizer_availability || "available"}
+                      onValueChange={(v) =>
+                        setUserData({ ...userData, organizer_availability: v })
+                      }
+                      disabled={!isEditing}
+                    >
+                      <SelectTrigger className="bg-background">
+                        <SelectValue placeholder="Availability" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="available">Available for new events</SelectItem>
+                        <SelectItem value="limited">Limited availability</SelectItem>
+                        <SelectItem value="unavailable">Not accepting new events</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="package-summary" className="text-card-foreground">
+                      Basic package / services (short summary)
+                    </Label>
+                    <Textarea
+                      id="package-summary"
+                      value={userData.organizer_package_summary || ""}
+                      onChange={(e) =>
+                        setUserData({ ...userData, organizer_package_summary: e.target.value })
+                      }
+                      disabled={!isEditing}
+                      className="bg-background min-h-[100px]"
+                      placeholder="e.g. Full planning from $2,500 — venue, catering coordination, day-of coordination."
+                      maxLength={2000}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This appears when hosts browse organizers. Keep it concise.
+                    </p>
+                  </div>
+                </>
               )}
             </div>
           </CardContent>
