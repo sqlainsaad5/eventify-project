@@ -13,49 +13,21 @@ import {
     RefreshCw,
     User,
     Calendar,
-    ChevronLeft,
     Circle,
-    Sparkles
 } from "lucide-react"
 import { toast } from "sonner"
-import Link from "next/link"
 
 export default function UserMessagesPage() {
     return (
-        <div className="min-h-screen bg-slate-50/60">
-            <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4">
-                <div className="max-w-7xl mx-auto flex items-center justify-between">
-                    <Link href="/my-events" className="flex items-center gap-2 group">
-                        <div className="p-2 bg-slate-50 rounded-xl group-hover:bg-indigo-50 transition-colors">
-                            <ChevronLeft className="h-5 w-5 text-slate-400 group-hover:text-indigo-600" />
-                        </div>
-                        <span className="font-bold text-slate-600 group-hover:text-indigo-600">Back to Events</span>
-                    </Link>
-                    <div className="flex items-center gap-3">
-                        <Sparkles className="h-5 w-5 text-indigo-600" />
-                        <span className="text-xl font-black text-slate-900 tracking-tighter">Eventify <span className="text-indigo-600">Chat</span></span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <Link
-                            href="/my-events/payments"
-                            className="text-sm font-bold text-slate-600 hover:text-indigo-600 transition-colors"
-                        >
-                            Payments
-                        </Link>
-                    </div>
-                </div>
-            </nav>
-
-            <Suspense fallback={
-                <div className="flex h-[70vh] items-center justify-center">
-                    <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
-                </div>
-            }>
-                <div className="max-w-7xl mx-auto p-6 md:p-8">
-                    <UserMessagesContent />
-                </div>
-            </Suspense>
-        </div>
+        <Suspense fallback={
+            <div className="flex h-[70vh] items-center justify-center">
+                <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
+            </div>
+        }>
+            <div className="max-w-7xl mx-auto">
+                <UserMessagesContent />
+            </div>
+        </Suspense>
     )
 }
 

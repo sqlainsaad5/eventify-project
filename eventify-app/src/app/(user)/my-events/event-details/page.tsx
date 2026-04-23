@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,7 +16,6 @@ import {
 } from "@/components/ui/select"
 import {
     Sparkles,
-    ArrowLeft,
     ArrowRight,
     Calendar,
     MapPin,
@@ -174,19 +172,12 @@ export default function EventDetailsPage() {
     }
 
     useEffect(() => {
-        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-        const role = localStorage.getItem("role")
-        if (token && role === "user") {
-            const q = typeof window !== "undefined" ? window.location.search : ""
-            router.replace(`/my-events/event-details${q}`)
-            return
-        }
         const storedUser = localStorage.getItem("user")
         if (storedUser) {
             setUser(JSON.parse(storedUser))
         }
         fetchOrganizers()
-    }, [router])
+    }, [])
 
     useEffect(() => {
         if (!organizers.length) return
@@ -361,27 +352,7 @@ export default function EventDetailsPage() {
 
     // ─── Main Form ───────────────────────────────────────────────────────────────
     return (
-        <div className="min-h-screen bg-slate-50 font-sans pb-20">
-
-            {/* ── Header ── */}
-            <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
-                <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-                    <Link href="/" className="flex items-center gap-3 group">
-                        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 transition-transform group-hover:rotate-12">
-                            <Sparkles className="h-5 w-5 text-white" />
-                        </div>
-                        <span className="text-2xl font-black tracking-tighter text-slate-900">
-                            Eventify<span className="text-indigo-600">.</span>
-                        </span>
-                    </Link>
-                    <Link
-                        href="/"
-                        className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest"
-                    >
-                        <ArrowLeft className="h-4 w-4" /> Back to Home
-                    </Link>
-                </div>
-            </header>
+        <div className="font-sans pb-8">
 
             {/* ── Hero Strip ── */}
             <div
@@ -1139,7 +1110,7 @@ export default function EventDetailsPage() {
                             </div>
                         </Button>
 
-                        
+                       
                     </div>
                 </form>
             </div>

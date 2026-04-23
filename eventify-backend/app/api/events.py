@@ -67,13 +67,17 @@ def list_events():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    # Personal events (created by user)
-    created_events = Event.query.filter_by(user_id=user_id).all()
+    # Personal events (created by user) — newest first (id is monotonic)
+    created_events = (
+        Event.query.filter_by(user_id=user_id).order_by(Event.id.desc()).all()
+    )
 
     # Assigned events (if user is organizer)
     assigned_events = []
     if user.role == "organizer":
-        assigned_events = Event.query.filter_by(organizer_id=user_id).all()
+        assigned_events = (
+            Event.query.filter_by(organizer_id=user_id).order_by(Event.id.desc()).all()
+        )
 
     # Compute total_spent from Payment table (same rules as get_budget_summary)
     event_ids = list({e.id for e in created_events} | {e.id for e in assigned_events})
@@ -516,17 +520,28 @@ def delete_event(event_id):
         if not event:
             return jsonify({"error": "Event not found"}), 404
 
-        # ✅ Notify and Unassign all vendors
         assigned_vendors_ids = [v.id for v in event.assigned_vendors.all()]
         event_name = event.name
-        
+
         for vendor in event.assigned_vendors.all():
             event.assigned_vendors.remove(vendor)
 
-        db.session.delete(event)
+        # Canceled (already soft-canceled): permanent removal.
+        if event.status == "canceled":
+            db.session.delete(event)
+            message = "Event removed permanently"
+        elif event.status == "completed":
+            db.session.delete(event)
+            message = "Event removed successfully"
+        else:
+            # In-progress / draft: soft-cancel so it appears under Canceled on the client dashboard.
+            event.status = "canceled"
+            event.organizer_id = None
+            event.organizer_status = "pending"
+            message = "Event canceled successfully"
+
         db.session.commit()
-        
-        # Notify them after commit
+
         try:
             from app.api.payments import create_notification
             for vid in assigned_vendors_ids:
@@ -539,7 +554,7 @@ def delete_event(event_id):
         except Exception as e:
             print(f"Delete event notification failed: {e}")
 
-        return jsonify({"message": "Event deleted successfully"}), 200
+        return jsonify({"message": message}), 200
 
     except Exception as e:
         db.session.rollback()

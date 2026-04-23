@@ -312,9 +312,9 @@ export default function HomePage() {
                 </>
               ) : (
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-5 w-full sm:w-auto">
-                  <Link href={role === "user" ? "/event-details" : "/dashboard"} className="w-full sm:w-auto">
+                  <Link href={role === "user" ? "/my-events" : "/dashboard"} className="w-full sm:w-auto">
                     <Button size="lg" className="w-full h-16 px-12 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xl font-black shadow-2xl shadow-slate-200 transition-all hover:scale-105 active:scale-95 group">
-                      {role === "user" ? "Create Event" : "Go to Dashboard"} <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
+                      {role === "user" ? "My Dashboard" : "Go to Dashboard"} <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
                     </Button>
                   </Link>
                   {role === "user" && (

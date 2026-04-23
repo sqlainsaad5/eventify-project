@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -13,8 +12,6 @@ import {
     Mail,
     Phone,
     MapPin,
-    ArrowLeft,
-    Sparkles,
     Loader2,
     Camera,
     CheckCircle,
@@ -155,27 +152,7 @@ export default function MyProfilePage() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 font-sans pb-20">
-            {/* ── Header ── */}
-            <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
-                <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-                    <Link href="/" className="flex items-center gap-3 group">
-                        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 transition-transform group-hover:rotate-12">
-                            <Sparkles className="h-5 w-5 text-white" />
-                        </div>
-                        <span className="text-2xl font-black tracking-tighter text-slate-900">
-                            Eventify<span className="text-indigo-600">.</span>
-                        </span>
-                    </Link>
-                    <Link
-                        href="/"
-                        className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest"
-                    >
-                        <ArrowLeft className="h-4 w-4" /> Back to Home
-                    </Link>
-                </div>
-            </header>
-
+        <div className="font-sans pb-8">
             {/* ── Hero Strip ── */}
             <div
                 className="py-16 text-center text-white relative overflow-hidden"
@@ -297,18 +274,7 @@ export default function MyProfilePage() {
                             </div>
                         </div>
 
-                        <div className="mt-14 p-8 rounded-[32px] bg-slate-900 text-white relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/20 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-indigo-600/40 transition-all duration-700" />
-                            <div className="relative z-10 flex items-center gap-6">
-                                <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10">
-                                    <Zap className="h-7 w-7 text-indigo-400" />
-                                </div>
-                                <div>
-                                    <h4 className="text-xl font-black tracking-tight">System Tier: Premium User</h4>
-                                    <p className="text-slate-400 font-medium text-sm mt-1 leading-relaxed">Your account has full authority to submit event details and manage private visions on our global platform.</p>
-                                </div>
-                            </div>
-                        </div>
+                        
                     </CardContent>
                 </Card>
             </main>

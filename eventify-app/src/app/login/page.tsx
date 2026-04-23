@@ -62,7 +62,7 @@ function LoginContent() {
                         router.push("/vendor")
                         break
                     case "user":
-                        router.push("/")
+                        router.push("/my-events")
                         break
                     default:
                         router.push("/dashboard")

@@ -89,8 +89,7 @@ function SignUpInner() {
         toast.info("Please contact admin for vendor verification.")
         router.push("/login")
       } else {
-        // 'user' role → home page
-        router.push("/")
+        router.push("/my-events")
       }
 
     } catch (err: any) {
