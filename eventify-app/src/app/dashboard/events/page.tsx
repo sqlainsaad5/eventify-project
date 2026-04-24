@@ -221,8 +221,14 @@ export default function AllEventsPage() {
     }
   }
 
-  const activePersonalEvents = events.filter((e) => !isEventCompleted(e))
-  const completedPersonalEvents = events.filter(isEventCompleted)
+  const activePersonalEvents = useMemo(
+    () => sortEventsRecentFirst(events.filter((e) => !isEventCompleted(e))),
+    [events]
+  )
+  const completedPersonalEvents = useMemo(
+    () => sortEventsRecentFirst(events.filter(isEventCompleted)),
+    [events]
+  )
 
   const activeAssignedEvents = assignedEvents.filter((e) => !isEventCompleted(e))
   const completedAssignedEvents = assignedEvents.filter(isEventCompleted)

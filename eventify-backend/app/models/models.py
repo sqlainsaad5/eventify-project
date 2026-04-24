@@ -38,6 +38,44 @@ def get_vendor_event_partnership_status(vendor_id, event_id):
     )
 
 
+def get_accepted_vendor_id_for_event(event_id):
+    """
+    If any vendor has accepted (approved) partnership for this event, return that vendor's id.
+    """
+    if event_id is None:
+        return None
+    row = (
+        db.session.query(vendor_events.c.vendor_id)
+        .filter(
+            vendor_events.c.event_id == event_id,
+            vendor_events.c.partnership_status == "accepted",
+        )
+        .first()
+    )
+    return int(row[0]) if row else None
+
+
+def get_reserving_vendor_id_for_event(event_id):
+    """
+    Return the vendor id that currently "holds" this event: any partnership row with
+    status *pending* or *accepted* (a request in flight or confirmed).
+
+    If such a row exists, the event must not be offered/assigned to any other vendor.
+    Rejected-only (or no rows) means the event is free to assign again.
+    """
+    if event_id is None:
+        return None
+    row = (
+        db.session.query(vendor_events.c.vendor_id)
+        .filter(
+            vendor_events.c.event_id == event_id,
+            vendor_events.c.partnership_status.in_(("pending", "accepted")),
+        )
+        .first()
+    )
+    return int(row[0]) if row else None
+
+
 class User(db.Model):
     __tablename__ = "user"
 
@@ -146,6 +184,14 @@ class Event(db.Model):
     organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
     organizer_status = db.Column(db.String(20), default="pending") # pending, accepted, rejected
 
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=True,
+    )
+
     # Relationships
     creator = db.relationship('User', foreign_keys=[user_id], backref='events_created')
     organizer = db.relationship('User', foreign_keys=[organizer_id], backref='events_organized')
@@ -196,6 +242,8 @@ class Event(db.Model):
             "completed_vendors": [
                 {"id": v.id, "name": v.name or "Vendor"} for v in self.completed_by_vendors.all()
             ],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

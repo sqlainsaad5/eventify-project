@@ -13,6 +13,7 @@ from app.models import (
     Review,
     vendor_events,
     get_vendor_event_partnership_status,
+    get_reserving_vendor_id_for_event,
 )
 from app.extensions import jwt
 
@@ -47,6 +48,10 @@ def get_vendors():
 
             assigned_events_with_status = []
             for event in org_events:
+                reserver = get_reserving_vendor_id_for_event(event.id)
+                if reserver is not None and reserver != v.id:
+                    # Event is pending/confirmed with a different vendor — hide from this vendor.
+                    continue
                 ev_dict = event.to_dict()
                 ev_dict["completed"] = event in v.completed_events
                 ev_dict["verified"] = VendorEventVerification.query.filter_by(
@@ -148,6 +153,16 @@ def assign_vendor():
 
         if vendor.role != "vendor":
             return jsonify({"error": "Invalid vendor"}), 400
+
+        vendor_id_int = int(vendor_id)
+        reserver = get_reserving_vendor_id_for_event(int(event_id))
+        if reserver is not None and reserver != vendor_id_int:
+            return jsonify({
+                "error": (
+                    "This event is already reserved for another vendor "
+                    "(pending or confirmed). You cannot assign a different vendor."
+                )
+            }), 400
 
         link_status = get_vendor_event_partnership_status(vendor_id, event_id)
         if link_status == "accepted":
@@ -398,6 +413,9 @@ def get_assigned_events(vendor_id):
         for event in vendor.assigned_events:
             if not event.organizer_id or event.organizer_status != "accepted":
                 continue
+            reserver = get_reserving_vendor_id_for_event(event.id)
+            if reserver is not None and int(reserver) != int(vendor_id):
+                continue
             pstatus = get_vendor_event_partnership_status(int(vendor_id), event.id) or "accepted"
             row_meta = (
                 db.session.query(
@@ -474,6 +492,9 @@ def get_vendor_bookings(vendor_id):
         bookings = []
         for event in vendor.assigned_events:
             if not event.organizer_id or event.organizer_status != "accepted":
+                continue
+            reserver = get_reserving_vendor_id_for_event(event.id)
+            if reserver is not None and int(reserver) != int(vendor_id):
                 continue
             if get_vendor_event_partnership_status(int(vendor_id), event.id) != "accepted":
                 continue

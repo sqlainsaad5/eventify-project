@@ -12,14 +12,29 @@ from app.models import (
     BudgetPlanItem,
     Review,
     vendor_events,
+    get_reserving_vendor_id_for_event,
 )
 import os
 import uuid
 from collections import defaultdict
+from datetime import datetime
 import requests
 from openai import OpenAI
 
 events_bp = Blueprint("events", __name__, url_prefix="/api/events")
+
+
+def _event_recency_sort_key(event):
+    """Newest activity first: updated_at, else created_at, else id (for legacy rows)."""
+    t = event.updated_at or event.created_at
+    if t is not None:
+        return (t.timestamp() if hasattr(t, "timestamp") else 0, event.id)
+    return (0.0, event.id)
+
+
+def _sort_events_by_recency_desc(events):
+    return sorted(events, key=_event_recency_sort_key, reverse=True)
+
 
 # ✅ Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
@@ -77,16 +92,15 @@ def list_events():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    # Personal events (created by user) — newest first (id is monotonic)
-    created_events = (
-        Event.query.filter_by(user_id=user_id).order_by(Event.id.desc()).all()
+    # Personal + assigned lists: order by last update (or creation), most recent first
+    created_events = _sort_events_by_recency_desc(
+        Event.query.filter_by(user_id=user_id).all()
     )
 
-    # Assigned events (if user is organizer)
     assigned_events = []
     if user.role == "organizer":
-        assigned_events = (
-            Event.query.filter_by(organizer_id=user_id).order_by(Event.id.desc()).all()
+        assigned_events = _sort_events_by_recency_desc(
+            Event.query.filter_by(organizer_id=user_id).all()
         )
 
     # Compute total_spent from Payment table (same rules as get_budget_summary)
@@ -124,6 +138,7 @@ def list_events():
         d["remaining_budget"] = float(e.budget or 0) - spent
         if e.organizer_id is None and e.status == "created":
             d["application_count"] = app_counts.get(e.id, 0)
+        d["reserving_vendor_id"] = get_reserving_vendor_id_for_event(e.id)
         return d
 
     return jsonify({
@@ -198,6 +213,7 @@ def create_event():
         else:
             status = "created"
 
+        now = datetime.utcnow()
         event = Event(
             name=data["name"].strip(),
             date=data["date"],
@@ -209,6 +225,8 @@ def create_event():
             organizer_id=organizer_id,
             progress=0,
             status=status,
+            created_at=now,
+            updated_at=now,
         )
 
         db.session.add(event)
@@ -462,6 +480,7 @@ def assign_organizer_to_event(event_id):
     application.status = "accepted"
     for other in EventApplication.query.filter_by(event_id=event_id).filter(EventApplication.id != application.id).all():
         other.status = "rejected"
+    event.updated_at = datetime.utcnow()
     db.session.commit()
 
     try:
@@ -509,6 +528,7 @@ def update_event(event_id):
             total_spent = float(event.total_spent or 0)
             event.remaining_budget = float(data["budget"]) - total_spent
 
+        event.updated_at = datetime.utcnow()
         db.session.commit()
         
         # Notify vendors with a pending or accepted partnership on this event
@@ -567,6 +587,16 @@ def assign_vendor(event_id):
         
         if not event:
             return jsonify({"error": "Event not found or unauthorized"}), 404
+
+        vendor_id_int = int(vendor_id)
+        reserver = get_reserving_vendor_id_for_event(int(event_id))
+        if reserver is not None and reserver != vendor_id_int:
+            return jsonify({
+                "error": (
+                    "This event is already reserved for another vendor "
+                    "(pending or confirmed). You cannot assign a different vendor."
+                )
+            }), 400
 
         vendor.assigned_event = event_id
         db.session.commit()
@@ -771,6 +801,7 @@ def respond_assignment(event_id):
             # Return event to a generic created state for the owner
             event.status = "created"
 
+        event.updated_at = datetime.utcnow()
         db.session.commit()
 
         # Notify the Event Creator
@@ -1017,6 +1048,7 @@ def complete_event(event_id):
         if event.progress is None or event.progress < 100:
             event.progress = 100
 
+        event.updated_at = datetime.utcnow()
         db.session.commit()
 
         # If organizer completed work after 25% payment, prompt next 75% request step via notification
@@ -1190,6 +1222,7 @@ def put_budget_plan(event_id):
                     sort_order=idx,
                 )
             )
+        event.updated_at = datetime.utcnow()
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -1223,6 +1256,7 @@ def update_event_budget(event_id):
     event.budget = budget_val
     total_spent = float(event.total_spent or 0)
     event.remaining_budget = budget_val - total_spent
+    event.updated_at = datetime.utcnow()
     db.session.commit()
 
     return jsonify({"message": "Budget updated", "event": event.to_dict()}), 200
@@ -1291,6 +1325,7 @@ def upsert_vendor_agreements(event_id):
             db.session.flush()
             results.append(new_agreement.to_dict())
 
+    event.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"vendor_agreements": results}), 200
 
@@ -1322,6 +1357,7 @@ def update_vendor_agreement(event_id, agreement_id):
     if "service_type" in data:
         agreement.service_type = (data["service_type"] or "General").strip() or "General"
 
+    event.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"vendor_agreement": agreement.to_dict()}), 200
 
@@ -1350,6 +1386,7 @@ def delete_vendor_agreement(event_id, agreement_id):
         }), 400
 
     db.session.delete(agreement)
+    event.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"message": "Vendor agreement removed"}), 200
 

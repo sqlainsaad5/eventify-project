@@ -78,3 +78,37 @@ def ensure_vendor_events_partnership_columns(app) -> None:
                     )
         except Exception as ex:
             app.logger.warning("ensure_vendor_events_partnership_columns: %s", ex)
+
+
+def ensure_event_timestamps(app) -> None:
+    """Add event.created_at / event.updated_at if missing (SQLite and others without Alembic)."""
+    with app.app_context():
+        try:
+            inspector = inspect(db.engine)
+            tables = inspector.get_table_names()
+            if "event" not in tables:
+                return
+            cols = {c["name"] for c in inspector.get_columns("event")}
+            with db.engine.begin() as conn:
+                if "created_at" not in cols:
+                    conn.execute(
+                        text("ALTER TABLE event ADD COLUMN created_at DATETIME")
+                    )
+                if "updated_at" not in cols:
+                    conn.execute(
+                        text("ALTER TABLE event ADD COLUMN updated_at DATETIME")
+                    )
+                conn.execute(
+                    text(
+                        "UPDATE event SET created_at = CURRENT_TIMESTAMP "
+                        "WHERE created_at IS NULL"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE event SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP) "
+                        "WHERE updated_at IS NULL"
+                    )
+                )
+        except Exception as ex:
+            app.logger.warning("ensure_event_timestamps: %s", ex)

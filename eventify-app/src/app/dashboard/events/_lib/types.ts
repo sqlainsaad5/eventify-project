@@ -14,6 +14,9 @@ export interface DashboardEvent {
   organizer_advance_paid?: boolean
   organizer_final_paid?: boolean
   completed_vendors?: { id: number; name: string }[]
+  /** ISO; used for "recent" ordering (newest first) */
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface AssignedReviewStatus {

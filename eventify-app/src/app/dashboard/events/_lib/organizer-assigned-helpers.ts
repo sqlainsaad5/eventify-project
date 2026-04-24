@@ -4,11 +4,25 @@ export function isEventCompleted(e: DashboardEvent) {
   return (typeof e.status === "string" && e.status.toLowerCase() === "completed") || Number(e.progress || 0) >= 100
 }
 
+/** Newest first: last updated, else created, else by id. */
+function eventRecencySortKey(e: DashboardEvent): number {
+  const u = e.updated_at
+  const c = e.created_at
+  if (u) {
+    const t = new Date(u).getTime()
+    if (!Number.isNaN(t)) return t
+  }
+  if (c) {
+    const t = new Date(c).getTime()
+    if (!Number.isNaN(t)) return t
+  }
+  return e.id
+}
+
 export function sortEventsRecentFirst(events: DashboardEvent[]): DashboardEvent[] {
   return [...events].sort((a, b) => {
-    const ta = new Date(a.date).getTime()
-    const tb = new Date(b.date).getTime()
-    if (tb !== ta) return tb - ta
+    const diff = eventRecencySortKey(b) - eventRecencySortKey(a)
+    if (diff !== 0) return diff
     return b.id - a.id
   })
 }

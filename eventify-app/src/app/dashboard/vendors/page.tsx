@@ -109,11 +109,15 @@ interface ServicePackage {
   features: string[];
 }
 
-/** Eligible project not already pending or accepted with this vendor */
+/** Eligible project: not already pending/confirmed with *another* vendor, and not already with this vendor. */
 function isEventOpenForPartnership(
-  vendor: Pick<Vendor, "assigned_events"> | null | undefined,
-  event: { id: number }
+  vendor: Pick<Vendor, "assigned_events" | "id"> | null | undefined,
+  event: { id: number; reserving_vendor_id?: number | null }
 ) {
+  const r = event.reserving_vendor_id;
+  if (r != null && r !== vendor?.id) {
+    return false;
+  }
   const list = Array.isArray(vendor?.assigned_events) ? vendor.assigned_events : [];
   return !list.some(
     (ae: { id: number; partnership_status?: string }) =>

@@ -34,11 +34,13 @@ def create_app():
         ensure_budget_plan_table,
         ensure_user_organizer_columns,
         ensure_vendor_events_partnership_columns,
+        ensure_event_timestamps,
     )
 
     ensure_user_organizer_columns(app)
     ensure_budget_plan_table(app)
     ensure_vendor_events_partnership_columns(app)
+    ensure_event_timestamps(app)
 
     # ✅ Smart CORS configuration
     def dynamic_origin(origin):
