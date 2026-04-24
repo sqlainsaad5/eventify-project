@@ -15,7 +15,6 @@ import {
   Menu,
   X,
   Sparkles,
-  Plus,
   User,
   LogOut,
   Settings,
@@ -491,16 +490,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         <main className="p-6 lg:p-10 max-w-7xl mx-auto">
           {children}
         </main>
-
-        {/* Floating action button */}
-        <Button
-          size="icon"
-          onClick={() => router.push("/dashboard/events")}
-          className="fixed bottom-8 right-8 h-14 w-14 rounded-2xl bg-purple-600 hover:bg-purple-700 shadow-xl shadow-purple-200 transition-all hover:scale-105 active:scale-95"
-          title="Create New Event"
-        >
-          <Plus className="h-6 w-6" />
-        </Button>
       </div>
     </div>
   )

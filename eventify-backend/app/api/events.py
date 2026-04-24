@@ -168,6 +168,16 @@ def create_event():
         if not data:
             return jsonify({"error": "No data provided"}), 400
 
+        if user.role == "organizer":
+            return (
+                jsonify(
+                    {
+                        "error": "Organizers cannot create events. New events are created by event hosts; apply from Open Events when a host posts a project."
+                    }
+                ),
+                403,
+            )
+
         required_fields = ["name", "date", "venue", "vendor_category", "budget"]
         missing = [f for f in required_fields if f not in data or not str(data[f]).strip()]
         if missing:

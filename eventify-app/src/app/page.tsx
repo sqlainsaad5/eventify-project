@@ -335,7 +335,7 @@ export default function HomePage() {
             {/* 🔹 EVENT DETAILS CTA BUTTON */}
             {user && role !== "user" && (
               <div className="mt-8 flex justify-center">
-                <Link href={user ? "/dashboard/events/new" : "/signup?from=event-cta"} className="w-full sm:w-auto">
+                <Link href={user ? "/dashboard/open-events" : "/signup?from=event-cta"} className="w-full sm:w-auto">
                   <Button
                     size="lg"
                     className="w-full h-14 px-10 rounded-2xl text-lg font-black text-white shadow-2xl shadow-fuchsia-200 transition-all hover:scale-105 active:scale-95 group relative overflow-hidden"
@@ -345,7 +345,7 @@ export default function HomePage() {
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       <Sparkles className="h-5 w-5 animate-pulse" />
-                      Create your Event
+                      Explore open events
                       <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
                     </span>
                     {/* Shimmer overlay */}

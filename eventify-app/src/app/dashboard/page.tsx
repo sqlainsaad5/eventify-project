@@ -13,7 +13,6 @@ import {
   Sparkles,
   MapPin,
   Clock,
-  Plus,
   Loader2,
   Star,
   Shield,
@@ -143,10 +142,7 @@ export default function DashboardPage() {
         if (Array.isArray(eventsData)) {
           normalizedEvents = eventsData
         } else if (eventsData && typeof eventsData === 'object') {
-          normalizedEvents = [
-            ...(eventsData.created || []),
-            ...(eventsData.assigned || [])
-          ]
+          normalizedEvents = [...(eventsData.assigned || [])]
         }
 
         // Final protection: ensure it's an array and remove duplicates
@@ -231,14 +227,6 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome back, {userName}! 👋</h1>
             <p className="text-slate-500 mt-1">Here's what's happening with your events today.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard/events/new">
-              <Button className="bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-100 rounded-xl">
-                <Plus className="h-4 w-4 mr-2" />
-                New Event
-              </Button>
-            </Link>
           </div>
         </div>
 
@@ -432,8 +420,8 @@ export default function DashboardPage() {
                 <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
                   <Calendar className="h-10 w-10 text-slate-300 mx-auto mb-3" />
                   <p className="text-slate-500 font-medium">No upcoming events found</p>
-                  <Link href="/dashboard/events">
-                    <Button variant="link" className="text-purple-600 mt-2">Create your first event</Button>
+                  <Link href="/dashboard/open-events">
+                    <Button variant="link" className="text-purple-600 mt-2">Browse open events</Button>
                   </Link>
                 </div>
               )}
@@ -473,7 +461,7 @@ export default function DashboardPage() {
                 </Link>
                 <Link href="/dashboard/events">
                   <Button variant="outline" className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl" size="sm">
-                    Plan New Project
+                    My Events
                   </Button>
                 </Link>
                 <Link href="/my-events/budget">

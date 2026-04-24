@@ -5,8 +5,7 @@ import { DashboardLayout } from "@/components/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Plus, Search, LayoutGrid, List, Loader2, Calendar } from "lucide-react"
-import Link from "next/link"
+import { Search, LayoutGrid, List, Loader2, Calendar } from "lucide-react"
 import { toast } from "sonner"
 import { ReviewDialog } from "@/components/review-dialog"
 import { DashboardEventGridCard } from "./_components/dashboard-event-grid-card"
@@ -27,13 +26,11 @@ import { AssignedEventDateRangeFilter } from "./_components/assigned-event-date-
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 export default function AllEventsPage() {
-  const [events, setEvents] = useState<DashboardEvent[]>([])
   const [assignedEvents, setAssignedEvents] = useState<DashboardEvent[]>([])
   const [organizerRequests, setOrganizerRequests] = useState<{ event_id: number; status: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
-  const [activeTab, setActiveTab] = useState<"personal" | "assigned">("personal")
   const [requestedAdvanceEventIds, setRequestedAdvanceEventIds] = useState<number[]>([])
   const [completingEventId, setCompletingEventId] = useState<number | null>(null)
   const [assignedReviewByEvent, setAssignedReviewByEvent] = useState<Record<number, AssignedReviewStatus>>({})
@@ -121,7 +118,6 @@ export default function AllEventsPage() {
       ])
       if (eventsRes.ok) {
         const data = await eventsRes.json()
-        setEvents((data.created as DashboardEvent[]) || [])
         assigned = (data.assigned as DashboardEvent[]) || []
         setAssignedEvents(assigned)
       } else {
@@ -176,7 +172,7 @@ export default function AllEventsPage() {
 
       if (res.ok) {
         toast.success("Event deleted successfully")
-        setEvents(events.filter(e => e.id !== id))
+        fetchEvents()
       } else {
         toast.error("Failed to delete event")
       }
@@ -221,20 +217,9 @@ export default function AllEventsPage() {
     }
   }
 
-  const activePersonalEvents = useMemo(
-    () => sortEventsRecentFirst(events.filter((e) => !isEventCompleted(e))),
-    [events]
-  )
-  const completedPersonalEvents = useMemo(
-    () => sortEventsRecentFirst(events.filter(isEventCompleted)),
-    [events]
-  )
-
   const activeAssignedEvents = assignedEvents.filter((e) => !isEventCompleted(e))
   const completedAssignedEvents = assignedEvents.filter(isEventCompleted)
 
-  const filteredActivePersonal = activePersonalEvents.filter(matchesSearch)
-  const filteredCompletedPersonal = completedPersonalEvents.filter(matchesSearch)
   const filteredActiveAssigned = activeAssignedEvents.filter(matchesSearch)
   const filteredCompletedAssigned = completedAssignedEvents.filter(matchesSearch)
 
@@ -248,36 +233,28 @@ export default function AllEventsPage() {
   )
   const assignedPreviewLimit = DASHBOARD_ASSIGNED_PREVIEW_LIMIT
 
-  const completedList = useMemo(() => {
-    const base = activeTab === "personal" ? filteredCompletedPersonal : filteredCompletedAssigned
-    if (activeTab !== "assigned") return base
-    return filterByEventDateRange(base, assignedDateFrom || null, assignedDateTo || null)
-  }, [activeTab, filteredCompletedPersonal, filteredCompletedAssigned, assignedDateFrom, assignedDateTo])
+  const completedList = useMemo(
+    () => filterByEventDateRange(filteredCompletedAssigned, assignedDateFrom || null, assignedDateTo || null),
+    [filteredCompletedAssigned, assignedDateFrom, assignedDateTo]
+  )
   const sortedCompletedList = useMemo(() => sortEventsRecentFirst(completedList), [completedList])
-  const completedDisplay =
-    activeTab === "assigned"
-      ? sortedCompletedList.slice(0, assignedPreviewLimit)
-      : sortedCompletedList
-  const showCompletedViewAll = activeTab === "assigned" && sortedCompletedList.length > assignedPreviewLimit
+  const completedDisplay = sortedCompletedList.slice(0, assignedPreviewLimit)
+  const showCompletedViewAll = sortedCompletedList.length > assignedPreviewLimit
   const completedViewAllHref = useMemo(
     () => withDateRangeQuery("/dashboard/events/assigned/completed", assignedDateFrom, assignedDateTo),
     [assignedDateFrom, assignedDateTo]
   )
-  const hasAnyCompletedForTab =
-    activeTab === "personal" ? filteredCompletedPersonal.length > 0 : filteredCompletedAssigned.length > 0
-  const showEventSurface = useMemo(() => {
-    if (activeTab === "personal")
-      return filteredActivePersonal.length > 0 || filteredCompletedPersonal.length > 0
-    return (
+  const hasAnyCompletedForTab = filteredCompletedAssigned.length > 0
+  const showEventSurface = useMemo(
+    () =>
       pendingAssigned.length + acceptedInProgress.length + declinedAssigned.length + otherAssigned.length > 0
-      || filteredCompletedAssigned.length > 0
-    )
-  }, [activeTab, filteredActivePersonal, filteredCompletedPersonal, pendingAssigned, acceptedInProgress, declinedAssigned, otherAssigned, filteredCompletedAssigned])
+      || filteredCompletedAssigned.length > 0,
+    [pendingAssigned, acceptedInProgress, declinedAssigned, otherAssigned, filteredCompletedAssigned]
+  )
   const assignedRangeHref = (subPath: string) => withDateRangeQuery(subPath, assignedDateFrom, assignedDateTo)
   const assignedOpenInRangeCount =
     pendingAssigned.length + acceptedInProgress.length + declinedAssigned.length + otherAssigned.length
   const showAssignedNoOpenButCompletedInFilter =
-    activeTab === "assigned" &&
     (assignedDateFrom || assignedDateTo) &&
     assignedOpenInRangeCount === 0 &&
     sortedCompletedList.length > 0
@@ -312,16 +289,8 @@ export default function AllEventsPage() {
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Your Events</h1>
-            <p className="text-slate-500 mt-1 font-medium">Explore and manage all your scheduled high-profile events.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard/events/new">
-              <Button className="bg-purple-600 hover:bg-purple-700 shadow-xl shadow-purple-100 rounded-2xl h-12 px-6 group">
-                <Plus className="h-5 w-5 mr-2 group-hover:rotate-90 transition-transform duration-300" />
-                Plan New Event
-              </Button>
-            </Link>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tight">My Events</h1>
+            <p className="text-slate-500 mt-1 font-medium">Assigned projects you manage for event hosts.</p>
           </div>
         </div>
 
@@ -337,22 +306,11 @@ export default function AllEventsPage() {
             />
           </div>
 
-          <div className="flex bg-slate-100/50 p-1.5 rounded-2xl gap-1">
-            <Button
-              variant={activeTab === "personal" ? "secondary" : "ghost"}
-              onClick={() => setActiveTab("personal")}
-              className={`rounded-xl h-9 px-4 text-xs font-black uppercase tracking-widest ${activeTab === "personal" ? "bg-white shadow-sm text-purple-600" : "text-slate-400"}`}
-            >
-              My Personal
-            </Button>
-            <Button
-              variant={activeTab === "assigned" ? "secondary" : "ghost"}
-              onClick={() => setActiveTab("assigned")}
-              className={`rounded-xl h-9 px-4 text-xs font-black uppercase tracking-widest ${activeTab === "assigned" ? "bg-white shadow-sm text-purple-600" : "text-slate-400"}`}
-            >
-              Assigned Projects {assignedEvents.length > 0 && <Badge className="ml-2 bg-purple-600 text-white border-none text-[8px] h-4 w-4 p-0 flex items-center justify-center">{assignedEvents.length}</Badge>}
-            </Button>
-          </div>
+          {assignedEvents.length > 0 && (
+            <Badge className="hidden sm:inline-flex bg-purple-100 text-purple-800 border-none text-xs font-bold px-3 py-1 rounded-full">
+              {assignedEvents.length} assigned
+            </Badge>
+          )}
 
           <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
             <Button
@@ -374,7 +332,7 @@ export default function AllEventsPage() {
           </div>
         </div>
 
-        {activeTab === "assigned" && !loading && (
+        {!loading && (
           <AssignedEventDateRangeFilter
             idPrefix="dash-assigned"
             fromValue={assignedDateFrom}
@@ -395,28 +353,7 @@ export default function AllEventsPage() {
             <p className="text-slate-500 font-bold animate-pulse uppercase tracking-widest text-[10px]">Assembling your events...</p>
           </div>
         ) : showEventSurface ? (
-          activeTab === "personal" ? (
-            viewMode === "grid" ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {filteredActivePersonal.map((event) => (
-                  <DashboardEventGridCard
-                    key={event.id}
-                    event={event}
-                    activeTab="personal"
-                    {...gridCardProps}
-                  />
-                ))}
-              </div>
-            ) : (
-              <DashboardEventListTable
-                events={filteredActivePersonal}
-                activeTab="personal"
-                getUserId={getUserId}
-                onDelete={handleDelete}
-                statusLabel={statusLabel}
-              />
-            )
-          ) : viewMode === "grid" ? (
+          viewMode === "grid" ? (
             <div className="space-y-16">
               {showAssignedNoOpenButCompletedInFilter && (
                   <div
@@ -590,46 +527,37 @@ export default function AllEventsPage() {
             <div className="h-20 w-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
               <Calendar className="h-10 w-10 text-slate-300" />
             </div>
-            <h3 className="text-xl font-bold text-slate-900">Quiet on the Event Front</h3>
-            <p className="text-slate-500 mt-2 max-w-xs text-center font-medium">No active events found matching your search. Start a new project to see it here.</p>
-            <Link href="/dashboard/events/new" className="mt-8">
-              <Button className="bg-slate-900 hover:bg-slate-800 text-white rounded-2xl h-12 px-8">
-                Start Planning
-              </Button>
-            </Link>
+            <h3 className="text-xl font-bold text-slate-900">No assignments yet</h3>
+            <p className="text-slate-500 mt-2 max-w-sm text-center font-medium">
+              You do not have any projects here yet. When a host assigns you to an event, it will show up in this list. Try adjusting your search or date filter.
+            </p>
           </div>
         )}
         {!loading && hasAnyCompletedForTab && (
           <div className="mt-12 space-y-4">
-            {activeTab === "assigned" ? (
-              <AssignedSectionHeader
-                title="Completed assigned projects"
-                showViewAll={showCompletedViewAll}
-                href={completedViewAllHref}
-              />
-            ) : (
-              <h2 className="text-lg font-bold text-slate-900">Completed Personal Projects</h2>
-            )}
+            <AssignedSectionHeader
+              title="Completed assigned projects"
+              showViewAll={showCompletedViewAll}
+              href={completedViewAllHref}
+            />
             {completedDisplay.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {completedDisplay.map((event) => (
                   <OrganizerCompletedEventCard
                     key={event.id}
                     event={event}
-                    showVendorSection={activeTab === "assigned"}
+                    showVendorSection
                     assignedReviewByEvent={assignedReviewByEvent}
                     onOpenReview={setVendorReviewDialog}
                   />
                 ))}
               </div>
             ) : (
-              activeTab === "assigned" && (
-                <div className="rounded-[32px] border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
-                  <p className="text-sm font-semibold text-slate-600">
-                    No completed assigned projects match the selected event date range. Adjust the dates or clear the filter.
-                  </p>
-                </div>
-              )
+              <div className="rounded-[32px] border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
+                <p className="text-sm font-semibold text-slate-600">
+                  No completed assigned projects match the selected event date range. Adjust the dates or clear the filter.
+                </p>
+              </div>
             )}
           </div>
         )}

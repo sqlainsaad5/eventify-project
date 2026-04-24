@@ -955,7 +955,7 @@ function VendorsPageContent() {
                   {organizerEvents.filter((event) => isEventOpenForPartnership(selectedVendor, event))
                   .length === 0 ? (
                     <div className="p-4 text-center text-xs text-slate-400 font-bold uppercase tracking-widest">
-                      No eligible projects found. Create a project in "Your Events", or all open projects are already with this vendor.
+                      No eligible projects found. You may not have any assigned projects yet, or all matching projects are already with this vendor.
                     </div>
                   ) : (
                     organizerEvents

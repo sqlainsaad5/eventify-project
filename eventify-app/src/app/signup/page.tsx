@@ -83,8 +83,7 @@ function SignUpInner() {
       }
 
       if (formData.role === "organizer") {
-        // If came from the event CTA, drop them straight into create-event
-        router.push(fromEventCTA ? "/dashboard/events/new" : "/dashboard")
+        router.push(fromEventCTA ? "/dashboard/open-events" : "/dashboard")
       } else if (formData.role === "vendor") {
         toast.info("Please contact admin for vendor verification.")
         router.push("/login")
