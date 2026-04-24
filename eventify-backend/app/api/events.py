@@ -1,8 +1,18 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from app.extensions import db
-from app.models import Event, User, EventVendorAgreement, Payment, EventApplication, BudgetPlanItem
+from app.models import (
+    Event,
+    User,
+    EventVendorAgreement,
+    Payment,
+    EventApplication,
+    BudgetPlanItem,
+    Review,
+    vendor_events,
+)
 import os
 import uuid
 from collections import defaultdict
@@ -355,8 +365,57 @@ def list_event_applications(event_id):
     if event.user_id != user_id:
         return jsonify({"error": "Only the event owner can view applications"}), 403
 
-    applications = EventApplication.query.filter_by(event_id=event_id).order_by(EventApplication.created_at.desc()).all()
-    return jsonify([a.to_dict() for a in applications]), 200
+    applications = (
+        EventApplication.query.options(joinedload(EventApplication.organizer))
+        .filter_by(event_id=event_id)
+        .order_by(EventApplication.created_at.desc())
+        .all()
+    )
+
+    org_ids = list({a.organizer_id for a in applications if a.organizer_id})
+    ratings_by_subject = {}
+    if org_ids:
+        rows = (
+            db.session.query(
+                Review.subject_id,
+                func.avg(Review.rating),
+                func.count(Review.id),
+            )
+            .filter(
+                Review.subject_id.in_(org_ids),
+                Review.review_type == "user_to_organizer",
+                Review.status == "published",
+            )
+            .group_by(Review.subject_id)
+            .all()
+        )
+        for subject_id, avg, cnt in rows:
+            ratings_by_subject[int(subject_id)] = (
+                round(float(avg), 2) if avg is not None else None,
+                int(cnt or 0),
+            )
+
+    def serialize_application(a):
+        d = a.to_dict()
+        org = a.organizer
+        if org:
+            host_avg, host_cnt = ratings_by_subject.get(org.id, (None, 0))
+            d["organizer_profile"] = {
+                "id": org.id,
+                "name": org.name,
+                "city": org.city,
+                "category": org.category,
+                "profile_image": org.profile_image,
+                "organizer_availability": (getattr(org, "organizer_availability", None) or "available"),
+                "organizer_package_summary": getattr(org, "organizer_package_summary", None),
+                "host_rating_avg": host_avg,
+                "host_rating_count": host_cnt,
+            }
+        else:
+            d["organizer_profile"] = None
+        return d
+
+    return jsonify([serialize_application(a) for a in applications]), 200
 
 
 @events_bp.route("/<int:event_id>/assign-organizer", methods=["POST"])
@@ -452,10 +511,18 @@ def update_event(event_id):
 
         db.session.commit()
         
-        # Notify Assigned Vendors
+        # Notify vendors with a pending or accepted partnership on this event
         try:
             from app.api.payments import create_notification
-            for vendor in event.assigned_vendors.all():
+            convo_vendors = (
+                User.query.join(vendor_events, User.id == vendor_events.c.vendor_id)
+                .filter(
+                    vendor_events.c.event_id == event.id,
+                    vendor_events.c.partnership_status.in_(["pending", "accepted"]),
+                )
+                .all()
+            )
+            for vendor in convo_vendors:
                 create_notification(
                     vendor.id,
                     "📝 Event Updated",
@@ -1055,9 +1122,17 @@ def get_budget_summary(event_id):
         })
 
     agreement_vendor_ids = {a.vendor_id for a in agreements}
+    accepted_vendors = (
+        User.query.join(vendor_events, User.id == vendor_events.c.vendor_id)
+        .filter(
+            vendor_events.c.event_id == event_id,
+            vendor_events.c.partnership_status == "accepted",
+        )
+        .all()
+    )
     assigned_without_agreement = [
         {"id": v.id, "name": v.name, "category": v.category or "Vendor"}
-        for v in event.assigned_vendors
+        for v in accepted_vendors
         if v.id not in agreement_vendor_ids
     ]
 

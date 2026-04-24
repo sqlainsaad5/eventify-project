@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { VendorLayout } from "@/components/vendor-layout"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -20,9 +20,17 @@ import {
   User,
   Star,
   Shield,
+  Handshake,
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
+import {
+  seedVendorBookingBaseline,
+  isVendorBookingUnseen,
+  markVendorBookingSeen,
+  getPreviewVisible,
+  VENDOR_EVENT_PREVIEW_COUNT,
+} from "@/lib/vendor-booking-notifications"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
@@ -41,6 +49,7 @@ type OrganizerReviewRow = {
 
 export default function VendorDashboard() {
   const [assignedEvents, setAssignedEvents] = useState<any[]>([])
+  const [partnershipRequests, setPartnershipRequests] = useState<any[]>([])
   const [paymentRequests, setPaymentRequests] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
   const [userName, setUserName] = useState("Vendor")
@@ -49,6 +58,9 @@ export default function VendorDashboard() {
   const [token, setToken] = useState("")
   const [organizerRatings, setOrganizerRatings] = useState<OrganizerRatingSummary | null>(null)
   const [organizerReviewRows, setOrganizerReviewRows] = useState<OrganizerReviewRow[]>([])
+  const [partnershipActionId, setPartnershipActionId] = useState<number | null>(null)
+  const [upcomingExpanded, setUpcomingExpanded] = useState(false)
+  const [badgeTick, setBadgeTick] = useState(0)
 
   useEffect(() => {
     const t = localStorage.getItem("token")?.replace(/['"]+/g, "").trim() || ""
@@ -62,8 +74,8 @@ export default function VendorDashboard() {
     if (token && vendorId) fetchDashboardData()
   }, [token, vendorId])
 
-  const fetchDashboardData = async () => {
-    setLoading(true)
+  const fetchDashboardData = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     try {
       // Fetch user profile for latest name
       const userRes = await fetch(`${API_BASE}/api/auth/me`, {
@@ -82,7 +94,14 @@ export default function VendorDashboard() {
       )
       if (eventsRes.ok) {
         const d = await eventsRes.json()
-        setAssignedEvents(d.assigned_events || [])
+        const accepted = d.assigned_events || []
+        const partners = Array.isArray(d.partnership_requests) ? d.partnership_requests : []
+        setPartnershipRequests(partners)
+        setAssignedEvents(accepted)
+        seedVendorBookingBaseline(vendorId, [
+          ...partners.map((p: { id: number }) => p.id),
+          ...accepted.map((e: { id: number }) => e.id),
+        ])
       }
 
       // Fetch services (uses vendor_id query param, no JWT)
@@ -130,18 +149,77 @@ export default function VendorDashboard() {
       console.error("Dashboard fetch error:", error)
       toast.error("Failed to sync dashboard data")
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }
+
+  const respondToPartnership = async (eventId: number, action: "accept" | "decline") => {
+    if (!token) return
+    setPartnershipActionId(eventId)
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/vendors/partnership/${action === "accept" ? "accept" : "decline"}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ event_id: eventId }),
+        }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(action === "accept" ? "Partnership confirmed" : "Request declined")
+        await fetchDashboardData({ silent: true })
+      } else {
+        toast.error((data as { error?: string }).error || "Something went wrong")
+      }
+    } catch {
+      toast.error("Network error")
+    } finally {
+      setPartnershipActionId(null)
+    }
+  }
+
+  const reviewRowsNewestFirst = [...organizerReviewRows].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0
+    return tb - ta
+  })
 
   const activeEvents = assignedEvents.filter((e) => e.status !== "completed")
   const completedEvents = assignedEvents.filter((e) => e.status === "completed")
   const activeServices = services.filter((s) => s.isActive !== false)
 
-  const upcomingEvents = [...assignedEvents]
+  const allUpcomingEvents = [...assignedEvents]
     .filter((e) => new Date(e.date) >= new Date())
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .slice(0, 4)
+    .sort((a, b) => {
+      const am = a.partnership_confirmed_at || a.assigned_at
+      const bm = b.partnership_confirmed_at || b.assigned_at
+      if (am && bm) return new Date(bm).getTime() - new Date(am).getTime()
+      return new Date(b.date).getTime() - new Date(a.date).getTime()
+    })
+  const upcomingEvents = getPreviewVisible(allUpcomingEvents, upcomingExpanded)
+  const upcomingRest = Math.max(0, allUpcomingEvents.length - VENDOR_EVENT_PREVIEW_COUNT)
+
+  const markSeen = (eventId: number) => {
+    if (!vendorId) return
+    markVendorBookingSeen(vendorId, eventId)
+    setBadgeTick((n) => n + 1)
+  }
+
+  const newBookingCount = useMemo(() => {
+    if (vendorId == null) return 0
+    let n = 0
+    for (const p of partnershipRequests) {
+      if (isVendorBookingUnseen(vendorId, p.id)) n += 1
+    }
+    for (const e of assignedEvents) {
+      if (isVendorBookingUnseen(vendorId, e.id)) n += 1
+    }
+    return n
+  }, [vendorId, partnershipRequests, assignedEvents, badgeTick])
 
   if (loading) {
     return (
@@ -169,13 +247,88 @@ export default function VendorDashboard() {
               Here's a snapshot of your vendor activity and upcoming events.
             </p>
           </div>
-          <Link href="/vendor/bookings">
-            <Button className="bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-100 rounded-xl">
+          <Link href="/vendor/bookings" className="relative inline-flex">
+            <Button className="bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-100 rounded-xl pr-8">
               <Calendar className="h-4 w-4 mr-2" />
               View Bookings
             </Button>
+            {newBookingCount > 0 && (
+              <span
+                className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white"
+                aria-label={`${newBookingCount} new booking${newBookingCount === 1 ? "" : "s"}`}
+              >
+                {newBookingCount > 9 ? "9+" : newBookingCount}
+              </span>
+            )}
           </Link>
         </div>
+
+        {partnershipRequests.length > 0 && (
+          <Card className="border-amber-200/80 bg-amber-50/40 shadow-sm rounded-3xl overflow-hidden">
+            <div className="p-6 md:p-7">
+              <div className="flex items-center gap-2 mb-4 text-amber-900">
+                <Handshake className="h-5 w-5" />
+                <h2 className="text-lg font-bold tracking-tight">Partnership requests</h2>
+                <Badge className="ml-1 bg-amber-200/80 text-amber-950 text-[10px] font-bold border-none">
+                  {partnershipRequests.length}
+                </Badge>
+              </div>
+              <p className="text-sm text-amber-950/80 font-medium mb-4">
+                Organizers are asking you to join these events. Approve to confirm; newest requests appear first.
+              </p>
+              <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {partnershipRequests.map((req) => (
+                  <li
+                    key={req.id}
+                    className="relative flex flex-col justify-between gap-3 bg-white/90 rounded-2xl border border-amber-100/80 p-4 sm:min-h-[7.5rem]"
+                  >
+                    {vendorId && isVendorBookingUnseen(vendorId, req.id) && (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow ring-2 ring-amber-50/50"
+                        aria-label="New booking"
+                      >
+                        1
+                      </span>
+                    )}
+                    <div
+                      className="pr-1"
+                      onClick={() => markSeen(req.id)}
+                    >
+                      <p className="font-bold text-slate-900">{req.name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {req.organizer_name ? `With ${req.organizer_name} · ` : ""}
+                        {new Date(req.date).toLocaleDateString()} · {req.venue}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="sm"
+                        className="rounded-xl bg-slate-900 text-white"
+                        disabled={partnershipActionId === req.id}
+                        onClick={() => respondToPartnership(req.id, "accept")}
+                      >
+                        {partnershipActionId === req.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "Accept"
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl border-amber-200/80"
+                        disabled={partnershipActionId === req.id}
+                        onClick={() => respondToPartnership(req.id, "decline")}
+                      >
+                        Decline
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Card>
+        )}
 
         {/* Vital Stats */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -253,12 +406,12 @@ export default function VendorDashboard() {
               )}
             </div>
             <CardContent className="flex-1 p-6 md:p-8">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4">Recent reviews</h3>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4">Recent reviews</h3>
               {organizerReviewRows.length === 0 ? (
                 <p className="text-slate-500 text-sm font-medium py-4">No organizer ratings yet.</p>
               ) : (
                 <ul className="space-y-4">
-                  {organizerReviewRows.map((rev) => (
+                  {reviewRowsNewestFirst.map((rev) => (
                     <li
                       key={rev.id}
                       className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 flex flex-col gap-2"
@@ -301,72 +454,111 @@ export default function VendorDashboard() {
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-slate-900">Upcoming Events</h2>
-              <Link href="/vendor/bookings">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider text-[11px]"
+              {allUpcomingEvents.length > 0 && (
+                <Link
+                  href="/vendor/bookings"
+                  className="text-sm font-bold uppercase tracking-wider text-purple-600 hover:text-purple-700"
                 >
-                  View All <ArrowRight className="h-3 w-3 ml-1" />
-                </Button>
-              </Link>
+                  Open bookings <ArrowRight className="h-3 w-3 inline ml-1" />
+                </Link>
+              )}
             </div>
 
-            <div className="grid gap-4">
+            <div className="space-y-4">
               {upcomingEvents.length > 0 ? (
-                upcomingEvents.map((event) => (
-                  <Card
-                    key={event.id}
-                    className="group hover:border-purple-200 hover:shadow-md transition-all duration-200 overflow-hidden border-slate-200/60 rounded-2xl"
-                  >
-                    <div className="flex items-center p-5">
-                      <div className="w-1.5 h-10 rounded-full bg-purple-600 mr-5" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-bold text-slate-900 truncate">{event.name}</h3>
-                          <Badge
-                            variant="secondary"
-                            className={`border-none text-[10px] uppercase font-bold px-1.5 py-0 ${event.status === "completed"
-                              ? "bg-emerald-50 text-emerald-600"
-                              : "bg-purple-50 text-purple-600"
-                              }`}
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {upcomingEvents.map((event) => (
+                      <Card
+                        key={event.id}
+                        className="group relative overflow-hidden border-slate-200/60 rounded-2xl transition-all duration-200 hover:border-purple-200 hover:shadow-md"
+                      >
+                        {vendorId && isVendorBookingUnseen(vendorId, event.id) && (
+                          <span
+                            className="absolute right-2 top-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow"
+                            aria-label="New booking"
                           >
-                            {event.status === "completed" ? "Completed" : "Active"}
-                          </Badge>
+                            1
+                          </span>
+                        )}
+                        <div className="h-1.5 w-full bg-gradient-to-r from-purple-500 to-indigo-500" />
+                        <div className="p-4 space-y-2">
+                          <div className="flex items-start justify-between gap-2 pr-6">
+                            <h3 className="font-bold text-slate-900 leading-snug line-clamp-2 min-h-[2.5rem]">
+                              {event.name}
+                            </h3>
+                            <Badge
+                              variant="secondary"
+                              className={`shrink-0 border-none text-[9px] uppercase font-bold px-1.5 py-0 ${
+                                event.status === "completed"
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : "bg-purple-50 text-purple-600"
+                              }`}
+                            >
+                              {event.status === "completed" ? "Done" : "Active"}
+                            </Badge>
+                          </div>
+                          <div className="space-y-1.5 text-xs text-slate-500">
+                            <p className="flex items-center gap-1.5">
+                              <Clock className="h-3.5 w-3.5 shrink-0" />
+                              {new Date(event.date).toLocaleDateString()}
+                            </p>
+                            <p className="flex items-center gap-1.5 line-clamp-1">
+                              <MapPin className="h-3.5 w-3.5 shrink-0" />
+                              {event.venue}
+                            </p>
+                            <p className="flex items-center gap-1.5">
+                              <DollarSign className="h-3.5 w-3.5 shrink-0" />
+                              Rs. {event.budget?.toLocaleString()}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            asChild
+                            className="w-full rounded-xl bg-slate-900/90 text-white mt-1"
+                          >
+                            <Link
+                              href="/vendor/bookings"
+                              onClick={() => markSeen(event.id)}
+                            >
+                              Open in bookings <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                            </Link>
+                          </Button>
                         </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          <p className="text-xs text-slate-500 flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {new Date(event.date).toLocaleDateString()}
-                          </p>
-                          <p className="text-xs text-slate-500 flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {event.venue}
-                          </p>
-                          <p className="text-xs text-slate-500 flex items-center gap-1">
-                            <DollarSign className="h-3 w-3" />
-                            Rs. {event.budget?.toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                      <Link href="/vendor/bookings">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-slate-400 group-hover:text-purple-600 transition-colors"
-                        >
-                          <ArrowRight className="h-5 w-5" />
-                        </Button>
-                      </Link>
+                      </Card>
+                    ))}
+                  </div>
+                  {upcomingRest > 0 && !upcomingExpanded && (
+                    <div className="flex justify-center">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-xl border-slate-200"
+                        onClick={() => setUpcomingExpanded(true)}
+                      >
+                        View all (+{upcomingRest} more)
+                      </Button>
                     </div>
-                  </Card>
-                ))
+                  )}
+                  {upcomingExpanded && allUpcomingEvents.length > VENDOR_EVENT_PREVIEW_COUNT && (
+                    <div className="flex justify-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="text-slate-600"
+                        onClick={() => setUpcomingExpanded(false)}
+                      >
+                        Show first {VENDOR_EVENT_PREVIEW_COUNT} only
+                      </Button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
                   <Calendar className="h-10 w-10 text-slate-300 mx-auto mb-3" />
                   <p className="text-slate-500 font-medium">No upcoming events assigned</p>
                   <p className="text-slate-400 text-sm mt-1">
-                    You'll see events here once an organizer assigns you.
+                    Confirm a partnership request above, or get assigned by an organizer.
                   </p>
                 </div>
               )}

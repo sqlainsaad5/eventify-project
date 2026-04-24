@@ -10,6 +10,7 @@ from app.models import (
     VendorEventVerification,
     EventVendorAgreement,
     Review,
+    get_vendor_event_partnership_status,
 )
 from sqlalchemy import or_, and_, func
 from datetime import datetime
@@ -369,7 +370,15 @@ def get_payments():
     for p in payments:
         d = p.to_dict()
         opr = OrganizerPaymentRequest.query.filter_by(payment_id=p.id).first()
-        d["payment_type"] = "organizer" if opr else None
+        if opr:
+            d["payment_type"] = "organizer"
+            d["workflow_category"] = "organizer_fee"
+        else:
+            d["payment_type"] = p.payment_type
+            if p.vendor_id is not None:
+                d["workflow_category"] = "vendor_payout"
+            else:
+                d["workflow_category"] = "event_funding"
         payments_list.append(d)
     return jsonify({"payments": payments_list}), 200
 
@@ -495,7 +504,9 @@ def request_payment():
     if not vendor or vendor.role != "vendor":
         return jsonify({"error": "Only vendors can submit payment requests"}), 403
     if event not in vendor.assigned_events:
-        return jsonify({"error": "You are not assigned to this event"}), 403
+        return jsonify({"error": "You are not linked to this event"}), 403
+    if get_vendor_event_partnership_status(int(user_id), int(event_id)) != "accepted":
+        return jsonify({"error": "Partnership must be confirmed before payment requests."}), 403
     verification = VendorEventVerification.query.filter_by(event_id=event_id, vendor_id=user_id).first()
     if not verification:
         return jsonify({
@@ -823,18 +834,30 @@ def clear_all_notifications():
 @payments_bp.route("/notifications/mark-read-by-action", methods=["PUT"])
 @jwt_required()
 def mark_read_by_action():
-    """Mark all notifications for the current user with the given extra_data.action as read (e.g. after viewing My Events or Open Events)."""
+    """Mark all notifications for the current user with the given extra_data.action as read (e.g. after viewing My Events or Open Events).
+    Optional `event_id`: only mark notifications whose extra_data.event_id matches (same action)."""
     user_id = int(get_jwt_identity())
     data = request.get_json() or {}
     action = data.get("action")
     if not action:
         return jsonify({"error": "action required"}), 400
+    event_id_filter = data.get("event_id")
+    if event_id_filter is not None:
+        try:
+            event_id_filter = int(event_id_filter)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid event_id"}), 400
     count = 0
     for n in demo_notifications:
         if int(n['user_id']) != user_id:
             continue
         if not n.get('extra_data') or n['extra_data'].get('action') != action:
             continue
+        if event_id_filter is not None:
+            ed = n['extra_data'] or {}
+            eid = ed.get("event_id")
+            if eid is None or int(eid) != int(event_id_filter):
+                continue
         if not n['is_read']:
             n['is_read'] = True
             count += 1

@@ -188,7 +188,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       }
       const count = vendors.reduce((acc: number, vendor: any) => {
         const pending = Array.isArray(vendor?.assigned_events)
-          ? vendor.assigned_events.filter((ev: any) => ev?.completed && !ev?.verified).length
+          ? vendor.assigned_events.filter(
+              (ev: { completed?: boolean; verified?: boolean; partnership_status?: string }) =>
+                (ev?.partnership_status === "accepted" || !ev?.partnership_status) &&
+                ev?.completed &&
+                !ev?.verified
+            ).length
           : 0
         return acc + pending
       }, 0)

@@ -30,10 +30,15 @@ def create_app():
     jwt.init_app(app)
     mail.init_app(app)
 
-    from .schema_patches import ensure_budget_plan_table, ensure_user_organizer_columns
+    from .schema_patches import (
+        ensure_budget_plan_table,
+        ensure_user_organizer_columns,
+        ensure_vendor_events_partnership_columns,
+    )
 
     ensure_user_organizer_columns(app)
     ensure_budget_plan_table(app)
+    ensure_vendor_events_partnership_columns(app)
 
     # ✅ Smart CORS configuration
     def dynamic_origin(origin):

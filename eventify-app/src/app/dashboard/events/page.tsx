@@ -1,69 +1,34 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import {
-  Calendar,
-  MapPin,
-  Plus,
-  Search,
-  MoreVertical,
-  Trash2,
-  Edit,
-  LayoutGrid,
-  List,
-  Filter,
-  Loader2,
-  Clock,
-  ExternalLink,
-  MessageSquare,
-  Star
-} from "lucide-react"
+import { Plus, Search, LayoutGrid, List, Loader2, Calendar } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Progress } from "@/components/ui/progress"
 import { ReviewDialog } from "@/components/review-dialog"
+import { DashboardEventGridCard } from "./_components/dashboard-event-grid-card"
+import { DashboardEventListTable } from "./_components/dashboard-event-list-row"
+import { AssignedSectionHeader } from "./_components/assigned-section-header"
+import { DASHBOARD_ASSIGNED_PREVIEW_LIMIT } from "./_lib/constants"
+import {
+  isEventCompleted,
+  partitionAssignedActiveForOrganizer,
+  sortEventsRecentFirst,
+  filterByEventDateRange,
+  withDateRangeQuery,
+} from "./_lib/organizer-assigned-helpers"
+import type { DashboardEvent, AssignedReviewStatus } from "./_lib/types"
+import { OrganizerCompletedEventCard } from "./_components/organizer-completed-event-card"
+import { AssignedEventDateRangeFilter } from "./_components/assigned-event-date-range-filter"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
-interface Event {
-  id: number
-  name: string
-  date: string
-  venue: string
-  budget: number
-  progress: number
-  vendor_category: string
-  image_url?: string
-  organizer_status?: string
-  user_id?: number
-  organizer_id?: number | null
-  status?: string
-  organizer_advance_paid?: boolean
-  organizer_final_paid?: boolean
-  completed_vendors?: { id: number; name: string }[]
-}
-
-interface AssignedReviewStatus {
-  my_organizer_to_vendor: Record<string, Record<string, unknown> | null>
-  can_review_vendor_ids: number[]
-}
-
 export default function AllEventsPage() {
-  const router = useRouter()
-  const [events, setEvents] = useState<Event[]>([])
-  const [assignedEvents, setAssignedEvents] = useState<Event[]>([])
+  const [events, setEvents] = useState<DashboardEvent[]>([])
+  const [assignedEvents, setAssignedEvents] = useState<DashboardEvent[]>([])
   const [organizerRequests, setOrganizerRequests] = useState<{ event_id: number; status: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -77,12 +42,14 @@ export default function AllEventsPage() {
     vendorId: number
     vendorName: string
   } | null>(null)
+  const [assignedDateFrom, setAssignedDateFrom] = useState("")
+  const [assignedDateTo, setAssignedDateTo] = useState("")
 
   useEffect(() => {
     fetchEvents()
   }, [])
 
-  const fetchAssignedReviewStatuses = async (assigned: Event[]) => {
+  const fetchAssignedReviewStatuses = async (assigned: DashboardEvent[]) => {
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     if (!token) return
     const targets = assigned.filter((e) => (e.completed_vendors?.length ?? 0) > 0 || e.status === "completed")
@@ -139,10 +106,10 @@ export default function AllEventsPage() {
     }).catch(() => {})
   }, [])
 
-  const fetchEvents = async (): Promise<Event[]> => {
+  const fetchEvents = async (): Promise<DashboardEvent[]> => {
     setLoading(true)
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-    let assigned: Event[] = []
+    let assigned: DashboardEvent[] = []
     try {
       const [eventsRes, organizerRequestsRes] = await Promise.all([
         fetch(`${API_BASE}/api/events`, {
@@ -154,8 +121,8 @@ export default function AllEventsPage() {
       ])
       if (eventsRes.ok) {
         const data = await eventsRes.json()
-        setEvents(data.created || [])
-        assigned = data.assigned || []
+        setEvents((data.created as DashboardEvent[]) || [])
+        assigned = (data.assigned as DashboardEvent[]) || []
         setAssignedEvents(assigned)
       } else {
         toast.error("Failed to fetch events")
@@ -236,14 +203,10 @@ export default function AllEventsPage() {
     }
   }
 
-  const matchesSearch = (e: Event) =>
+  const matchesSearch = (e: DashboardEvent) =>
     e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
     e.vendor_category.toLowerCase().includes(searchQuery.toLowerCase())
-
-  const isCompleted = (e: Event) =>
-    (typeof e.status === "string" && e.status.toLowerCase() === "completed") ||
-    Number(e.progress || 0) >= 100
 
   const organizerAdvanceLabel = (status?: string) => {
     switch (status) {
@@ -258,19 +221,60 @@ export default function AllEventsPage() {
     }
   }
 
-  const activePersonalEvents = events.filter(e => !isCompleted(e))
-  const completedPersonalEvents = events.filter(isCompleted)
+  const activePersonalEvents = events.filter((e) => !isEventCompleted(e))
+  const completedPersonalEvents = events.filter(isEventCompleted)
 
-  const activeAssignedEvents = assignedEvents.filter(e => !isCompleted(e))
-  const completedAssignedEvents = assignedEvents.filter(isCompleted)
+  const activeAssignedEvents = assignedEvents.filter((e) => !isEventCompleted(e))
+  const completedAssignedEvents = assignedEvents.filter(isEventCompleted)
 
   const filteredActivePersonal = activePersonalEvents.filter(matchesSearch)
   const filteredCompletedPersonal = completedPersonalEvents.filter(matchesSearch)
   const filteredActiveAssigned = activeAssignedEvents.filter(matchesSearch)
   const filteredCompletedAssigned = completedAssignedEvents.filter(matchesSearch)
 
-  const activeList = activeTab === "personal" ? filteredActivePersonal : filteredActiveAssigned
-  const completedList = activeTab === "personal" ? filteredCompletedPersonal : filteredCompletedAssigned
+  const activeAssignedInDateRange = useMemo(
+    () => filterByEventDateRange(filteredActiveAssigned, assignedDateFrom || null, assignedDateTo || null),
+    [filteredActiveAssigned, assignedDateFrom, assignedDateTo]
+  )
+  const { pending: pendingAssigned, accepted: acceptedInProgress, declined: declinedAssigned, other: otherAssigned } = useMemo(
+    () => partitionAssignedActiveForOrganizer(activeAssignedInDateRange),
+    [activeAssignedInDateRange]
+  )
+  const assignedPreviewLimit = DASHBOARD_ASSIGNED_PREVIEW_LIMIT
+
+  const completedList = useMemo(() => {
+    const base = activeTab === "personal" ? filteredCompletedPersonal : filteredCompletedAssigned
+    if (activeTab !== "assigned") return base
+    return filterByEventDateRange(base, assignedDateFrom || null, assignedDateTo || null)
+  }, [activeTab, filteredCompletedPersonal, filteredCompletedAssigned, assignedDateFrom, assignedDateTo])
+  const sortedCompletedList = useMemo(() => sortEventsRecentFirst(completedList), [completedList])
+  const completedDisplay =
+    activeTab === "assigned"
+      ? sortedCompletedList.slice(0, assignedPreviewLimit)
+      : sortedCompletedList
+  const showCompletedViewAll = activeTab === "assigned" && sortedCompletedList.length > assignedPreviewLimit
+  const completedViewAllHref = useMemo(
+    () => withDateRangeQuery("/dashboard/events/assigned/completed", assignedDateFrom, assignedDateTo),
+    [assignedDateFrom, assignedDateTo]
+  )
+  const hasAnyCompletedForTab =
+    activeTab === "personal" ? filteredCompletedPersonal.length > 0 : filteredCompletedAssigned.length > 0
+  const showEventSurface = useMemo(() => {
+    if (activeTab === "personal")
+      return filteredActivePersonal.length > 0 || filteredCompletedPersonal.length > 0
+    return (
+      pendingAssigned.length + acceptedInProgress.length + declinedAssigned.length + otherAssigned.length > 0
+      || filteredCompletedAssigned.length > 0
+    )
+  }, [activeTab, filteredActivePersonal, filteredCompletedPersonal, pendingAssigned, acceptedInProgress, declinedAssigned, otherAssigned, filteredCompletedAssigned])
+  const assignedRangeHref = (subPath: string) => withDateRangeQuery(subPath, assignedDateFrom, assignedDateTo)
+  const assignedOpenInRangeCount =
+    pendingAssigned.length + acceptedInProgress.length + declinedAssigned.length + otherAssigned.length
+  const showAssignedNoOpenButCompletedInFilter =
+    activeTab === "assigned" &&
+    (assignedDateFrom || assignedDateTo) &&
+    assignedOpenInRangeCount === 0 &&
+    sortedCompletedList.length > 0
 
   const getUserId = (): number | null => {
     try {
@@ -279,6 +283,21 @@ export default function AllEventsPage() {
       const parsed = JSON.parse(u)
       return parsed?.id ?? parsed?._id ?? null
     } catch { return null }
+  }
+
+  const gridCardProps = {
+    getUserId,
+    organizerRequests,
+    onDelete: handleDelete,
+    onAssignmentResponse: handleAssignmentResponse,
+    onRefetch: fetchEvents,
+    apiBase: API_BASE,
+    requestedAdvanceEventIds,
+    setRequestedAdvanceEventIds,
+    completingEventId,
+    setCompletingEventId,
+    statusLabel,
+    organizerAdvanceLabel,
   }
 
   return (
@@ -349,364 +368,215 @@ export default function AllEventsPage() {
           </div>
         </div>
 
+        {activeTab === "assigned" && !loading && (
+          <AssignedEventDateRangeFilter
+            idPrefix="dash-assigned"
+            fromValue={assignedDateFrom}
+            toValue={assignedDateTo}
+            onFromChange={setAssignedDateFrom}
+            onToChange={setAssignedDateTo}
+            onClear={() => {
+              setAssignedDateFrom("")
+              setAssignedDateTo("")
+            }}
+          />
+        )}
+
         {/* Events Content */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <Loader2 className="h-10 w-10 text-purple-600 animate-spin" />
             <p className="text-slate-500 font-bold animate-pulse uppercase tracking-widest text-[10px]">Assembling your events...</p>
           </div>
-        ) : activeList.length > 0 ? (
-          viewMode === "grid" ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {activeList.map((event) => {
-                const userId = getUserId()
-                const organizerAdvancePaid = !!event.organizer_advance_paid
-                const organizerFinalPaid = !!event.organizer_final_paid
-                const organizerFullyPaid =
-                  userId != null &&
-                  event.organizer_id === userId &&
-                  organizerAdvancePaid &&
-                  organizerFinalPaid
-
-                const requestsForEvent = organizerRequests.filter((r) => r.event_id === event.id)
-
-                // Derive 25% advance status: pending/rejected only before it's paid,
-                // otherwise show as paid regardless of later 75% requests.
-                const hasPendingAdvanceRequest =
-                  !organizerAdvancePaid && requestsForEvent.some((r) => r.status === "pending")
-                const hasRejectedAdvanceRequest =
-                  !organizerAdvancePaid &&
-                  !hasPendingAdvanceRequest &&
-                  requestsForEvent.some((r) => r.status === "rejected")
-
-                const advanceStatus = organizerAdvancePaid
-                  ? "paid"
-                  : hasPendingAdvanceRequest
-                  ? "pending"
-                  : hasRejectedAdvanceRequest
-                  ? "rejected"
-                  : undefined
-
-                return (
-                <Card
-                  key={event.id}
-                  className={`group overflow-hidden border-slate-200/60 shadow-sm transition-all duration-500 rounded-[32px] bg-white ${
-                    activeTab === "assigned" ? "border-l-4 border-l-emerald-500" : ""
-                  } ${
-                    organizerFullyPaid
-                      ? "opacity-85 border-slate-200 hover:shadow-lg"
-                      : "hover:shadow-2xl hover:shadow-purple-100"
-                  }`}
-                >
-                  <div className="relative h-48 bg-slate-100 overflow-hidden">
-                    <img
-                      src={event.image_url || `https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=500&q=80`}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                      alt={event.name}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="absolute top-4 left-4 flex gap-2">
-                      <Badge className="bg-white/90 backdrop-blur-md text-purple-600 border-none hover:bg-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
-                        {event.vendor_category}
-                      </Badge>
-                      {organizerFullyPaid && (
-                        <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Fully Paid</Badge>
-                      )}
-                      {activeTab === "assigned" && (
-                        <Badge className="bg-emerald-500 text-white border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
-                          Managed Project
-                        </Badge>
-                      )}
-                      {event.status === "advance_payment_completed" || event.status === "vendor_assigned" ? (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
-                          25% Advance Payment Completed
-                        </Badge>
-                      ) : null}
-                    </div>
+        ) : showEventSurface ? (
+          activeTab === "personal" ? (
+            viewMode === "grid" ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {filteredActivePersonal.map((event) => (
+                  <DashboardEventGridCard
+                    key={event.id}
+                    event={event}
+                    activeTab="personal"
+                    {...gridCardProps}
+                  />
+                ))}
+              </div>
+            ) : (
+              <DashboardEventListTable
+                events={filteredActivePersonal}
+                activeTab="personal"
+                getUserId={getUserId}
+                onDelete={handleDelete}
+                statusLabel={statusLabel}
+              />
+            )
+          ) : viewMode === "grid" ? (
+            <div className="space-y-16">
+              {showAssignedNoOpenButCompletedInFilter && (
+                  <div
+                    className="rounded-2xl border border-violet-200/60 bg-violet-50/50 px-4 py-3 text-sm text-slate-600"
+                    role="status"
+                  >
+                    No open assignments in this event date range. You still have completed projects in this
+                    range—see below.
                   </div>
-                  <CardContent className="p-6">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-xl font-bold text-slate-900 truncate group-hover:text-purple-600 transition-colors">{event.name}</h3>
-                        <div className="flex items-center gap-2 text-slate-500 mt-2 text-sm font-medium">
-                          <MapPin className="h-3.5 w-3.5 text-purple-500" />
-                          <span className="truncate">{event.venue}</span>
-                        </div>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-slate-100">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48 rounded-2xl p-2 shadow-xl border-slate-100">
-                          <DropdownMenuItem className="rounded-xl p-2.5 cursor-pointer">
-                            <Edit className="h-4 w-4 mr-2" />
-                            Edit Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="rounded-xl p-2.5 cursor-pointer">
-                            <ExternalLink className="h-4 w-4 mr-2" />
-                            View Dashboard
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleDelete(event.id)}
-                            className="rounded-xl p-2.5 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete Event
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    <div className="space-y-4">
-                      {activeTab === "assigned" && event.organizer_status === "pending" ? (
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() => handleAssignmentResponse(event.id, 'accepted')}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 h-10 rounded-xl font-bold text-xs uppercase tracking-widest"
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => handleAssignmentResponse(event.id, 'rejected')}
-                            className="flex-1 border-red-200 text-red-600 hover:bg-red-50 h-10 rounded-xl font-bold text-xs uppercase tracking-widest"
-                          >
-                            Decline
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-widest">
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5" />
-                              {new Date(event.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-black text-slate-500">
-                                {statusLabel(event.status)}
-                              </span>
-                              <span className="text-purple-600 font-black">
-                                ${(event.budget / 1000).toFixed(1)}k
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex justify-between text-[11px] font-bold">
-                              <span className="text-slate-500">Project Progress</span>
-                              <span className="text-purple-600">{event.progress}%</span>
-                            </div>
-                            <Progress value={event.progress} className="h-2 bg-slate-100" />
-                          </div>
-
-                          {activeTab === "assigned" && (
-                            <div className="space-y-3">
-                              <Badge
-                                variant="outline"
-                                className={`w-full py-1.5 justify-center rounded-xl border-none font-black text-[9px] uppercase tracking-widest ${
-                                  event.organizer_status === "accepted"
-                                    ? "bg-emerald-50 text-emerald-600"
-                                    : "bg-red-50 text-red-600"
-                                }`}
-                              >
-                                {event.organizer_status === "accepted" ? "Vision Active" : "Assignment Declined"}
-                              </Badge>
-
-                              {advanceStatus && (
-                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 text-center">
-                                  {organizerAdvanceLabel(advanceStatus)}
-                                </p>
-                              )}
-
-                              {event.status === "pending_advance_payment" && requestsForEvent.length === 0 && !requestedAdvanceEventIds.includes(event.id) && (
-                                <Button
-                                  onClick={async () => {
-                                    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-                                    try {
-                                      const res = await fetch(
-                                        `${API_BASE}/api/events/${event.id}/create-advance-request`,
-                                        {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type": "application/json",
-                                            Authorization: `Bearer ${token}`,
-                                          },
-                                        }
-                                      )
-                                      const data = await res.json()
-                                      if (res.ok) {
-                                        setRequestedAdvanceEventIds((prev) => [...prev, event.id])
-                                        toast.success("25% payment request sent to user")
-                                        fetchEvents()
-                                      } else {
-                                        toast.error(data.error || "Failed to create advance request")
-                                      }
-                                    } catch {
-                                      toast.error("Error creating advance request")
-                                    }
-                                  }}
-                                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 shadow-lg"
-                                >
-                                  Request 25% Advance
-                                </Button>
-                              )}
-                              {event.status === "pending_advance_payment" && (hasPendingAdvanceRequest || requestedAdvanceEventIds.includes(event.id)) && (
-                                <div className="w-full h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center justify-center bg-slate-100 text-slate-600 border border-slate-200">
-                                  Requested
-                                </div>
-                              )}
-
-                              {event.organizer_status === "accepted" && (
-                                <Button
-                                  onClick={() => router.push(`/dashboard/messages?partnerId=${event.user_id}`)}
-                                  className="w-full bg-slate-900 hover:bg-black text-white h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 shadow-lg"
-                                >
-                                  <MessageSquare className="h-3.5 w-3.5" />
-                                  Message Client
-                                </Button>
-                              )}
-
-                              {(event.status === "advance_payment_completed" || event.status === "vendor_assigned") &&
-                                typeof event.status === "string" &&
-                                event.status.toLowerCase() !== "completed" && (
-                                  <Button
-                                    disabled={completingEventId === event.id}
-                                    onClick={async () => {
-                                      const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-                                      if (!token) return router.push("/login")
-                                      setCompletingEventId(event.id)
-                                      try {
-                                        const res = await fetch(
-                                          `${API_BASE}/api/events/${event.id}/complete`,
-                                          { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-                                        )
-                                        const data = await res.json().catch(() => ({}))
-                                        if (res.ok) {
-                                          toast.success("Event marked as completed.")
-                                          toast("Next step required", {
-                                            description: "Open Payments > Organizer Fees and request the remaining 75% payment from the client.",
-                                            action: {
-                                              label: "Open Organizer Fees",
-                                              onClick: () => router.push("/dashboard/payments?tab=organizer"),
-                                            },
-                                          })
-                                          fetchEvents()
-                                          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("refresh-notifications"))
-                                        } else {
-                                          toast.error(data.error || "Failed to mark event as completed")
-                                        }
-                                      } catch (err) {
-                                        console.error(err)
-                                        toast.error("Failed to mark event as completed")
-                                      } finally {
-                                        setCompletingEventId(null)
-                                      }
-                                    }}
-                                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-10 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 shadow-lg"
-                                  >
-                                    {completingEventId === event.id ? (
-                                      <>
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                        Completing...
-                                      </>
-                                    ) : (
-                                      "Complete event"
-                                    )}
-                                  </Button>
-                                )}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );})}
+                )}
+              {pendingAssigned.length > 0 && (
+                <section className="space-y-6">
+                  <AssignedSectionHeader
+                    title="Awaiting your approval"
+                    showViewAll={pendingAssigned.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/pending")}
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {pendingAssigned.slice(0, assignedPreviewLimit).map((event) => (
+                      <DashboardEventGridCard
+                        key={event.id}
+                        event={event}
+                        activeTab="assigned"
+                        {...gridCardProps}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+              {acceptedInProgress.length > 0 && (
+                <section className="space-y-6">
+                  <AssignedSectionHeader
+                    title="Active projects"
+                    showViewAll={acceptedInProgress.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/in-progress")}
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {acceptedInProgress.slice(0, assignedPreviewLimit).map((event) => (
+                      <DashboardEventGridCard
+                        key={event.id}
+                        event={event}
+                        activeTab="assigned"
+                        {...gridCardProps}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+              {declinedAssigned.length > 0 && (
+                <section className="space-y-6">
+                  <AssignedSectionHeader
+                    title="Declined assignments"
+                    showViewAll={declinedAssigned.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/declined")}
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {declinedAssigned.slice(0, assignedPreviewLimit).map((event) => (
+                      <DashboardEventGridCard
+                        key={event.id}
+                        event={event}
+                        activeTab="assigned"
+                        {...gridCardProps}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+              {otherAssigned.length > 0 && (
+                <section className="space-y-6">
+                  <AssignedSectionHeader
+                    title="Other assignments"
+                    showViewAll={otherAssigned.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/other")}
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {otherAssigned.slice(0, assignedPreviewLimit).map((event) => (
+                      <DashboardEventGridCard
+                        key={event.id}
+                        event={event}
+                        activeTab="assigned"
+                        {...gridCardProps}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           ) : (
-            <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/50">
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Event Name</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Date & Location</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Category</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Budget</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                    <th className="px-6 py-4"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {activeList.map((event) => {
-                    const userId = getUserId()
-                    const organizerAdvancePaid = !!event.organizer_advance_paid
-                    const organizerFinalPaid = !!event.organizer_final_paid
-                    const organizerFullyPaid =
-                      userId != null &&
-                      event.organizer_id === userId &&
-                      organizerAdvancePaid &&
-                      organizerFinalPaid
-
-                    return (
-                    <tr
-                      key={event.id}
-                      className={`transition-colors group ${
-                        organizerFullyPaid ? "bg-slate-50/80 opacity-90" : "hover:bg-slate-50/80"
-                      }`}
-                    >
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0">
-                            <img src={event.image_url || `https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=100&q=80`} className="h-full w-full object-cover" alt="" />
-                          </div>
-                          <span className="font-bold text-slate-900 group-hover:text-purple-600 transition-colors">{event.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-                            <Clock className="h-3 w-3 text-slate-400" />
-                            {new Date(event.date).toLocaleDateString()}
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                            <MapPin className="h-3 w-3" />
-                            {event.venue}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5">
-                        <Badge variant="secondary" className="bg-slate-100 text-slate-600 border-none font-bold text-[10px] px-2.5">
-                          {event.vendor_category}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-5">
-                        <span className="font-black text-slate-900">Rs. {event.budget.toLocaleString()}</span>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="w-40 space-y-1.5">
-                          {organizerFullyPaid && (
-                            <Badge className="bg-emerald-100 text-emerald-700 font-semibold mb-1">Paid</Badge>
-                          )}
-                          <div className="text-[10px] font-bold text-slate-500 truncate">
-                            {statusLabel(event.status)}
-                          </div>
-                          <div className="flex justify-between text-[10px] font-bold text-slate-400">
-                            <span>{event.progress}%</span>
-                          </div>
-                          <Progress value={event.progress} className="h-1.5 bg-slate-100" />
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 text-right">
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(event.id)} className="h-8 w-8 text-slate-300 hover:text-red-500">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );})}
-                </tbody>
-              </table>
+            <div className="space-y-10">
+              {showAssignedNoOpenButCompletedInFilter && (
+                <div
+                  className="rounded-2xl border border-violet-200/60 bg-violet-50/50 px-4 py-3 text-sm text-slate-600"
+                  role="status"
+                >
+                  No open assignments in this event date range. You still have completed projects in this
+                  range—see below.
+                </div>
+              )}
+              {pendingAssigned.length > 0 && (
+                <div className="space-y-4">
+                  <AssignedSectionHeader
+                    title="Awaiting your approval"
+                    showViewAll={pendingAssigned.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/pending")}
+                  />
+                  <DashboardEventListTable
+                    events={pendingAssigned.slice(0, assignedPreviewLimit)}
+                    activeTab="assigned"
+                    getUserId={getUserId}
+                    onDelete={handleDelete}
+                    onAssignmentResponse={handleAssignmentResponse}
+                    statusLabel={statusLabel}
+                  />
+                </div>
+              )}
+              {acceptedInProgress.length > 0 && (
+                <div className="space-y-4">
+                  <AssignedSectionHeader
+                    title="Active projects"
+                    showViewAll={acceptedInProgress.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/in-progress")}
+                  />
+                  <DashboardEventListTable
+                    events={acceptedInProgress.slice(0, assignedPreviewLimit)}
+                    activeTab="assigned"
+                    getUserId={getUserId}
+                    onDelete={handleDelete}
+                    onAssignmentResponse={handleAssignmentResponse}
+                    statusLabel={statusLabel}
+                  />
+                </div>
+              )}
+              {declinedAssigned.length > 0 && (
+                <div className="space-y-4">
+                  <AssignedSectionHeader
+                    title="Declined assignments"
+                    showViewAll={declinedAssigned.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/declined")}
+                  />
+                  <DashboardEventListTable
+                    events={declinedAssigned.slice(0, assignedPreviewLimit)}
+                    activeTab="assigned"
+                    getUserId={getUserId}
+                    onDelete={handleDelete}
+                    onAssignmentResponse={handleAssignmentResponse}
+                    statusLabel={statusLabel}
+                  />
+                </div>
+              )}
+              {otherAssigned.length > 0 && (
+                <div className="space-y-4">
+                  <AssignedSectionHeader
+                    title="Other assignments"
+                    showViewAll={otherAssigned.length > assignedPreviewLimit}
+                    href={assignedRangeHref("/dashboard/events/assigned/other")}
+                  />
+                  <DashboardEventListTable
+                    events={otherAssigned.slice(0, assignedPreviewLimit)}
+                    activeTab="assigned"
+                    getUserId={getUserId}
+                    onDelete={handleDelete}
+                    onAssignmentResponse={handleAssignmentResponse}
+                    statusLabel={statusLabel}
+                  />
+                </div>
+              )}
             </div>
           )
         ) : (
@@ -723,101 +593,38 @@ export default function AllEventsPage() {
             </Link>
           </div>
         )}
-        {!loading && completedList.length > 0 && (
+        {!loading && hasAnyCompletedForTab && (
           <div className="mt-12 space-y-4">
-            <h2 className="text-lg font-bold text-slate-900">
-              Completed {activeTab === "personal" ? "Personal Projects" : "Assigned Projects"}
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {completedList.map((event) => (
-                <Card key={event.id} className="group overflow-hidden border-slate-200/60 shadow-sm rounded-[32px] bg-slate-50">
-                  <div className="relative h-40 bg-slate-100 overflow-hidden">
-                    <img
-                      src={event.image_url || `https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=500&q=80`}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                      alt={event.name}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="absolute top-4 left-4 flex gap-2">
-                      <Badge className="bg-white/90 backdrop-blur-md text-purple-600 border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
-                        {event.vendor_category}
-                      </Badge>
-                      <Badge className="bg-emerald-500 text-white border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
-                        Completed
-                      </Badge>
-                    </div>
-                  </div>
-                  <CardContent className="p-6">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-bold text-slate-900 truncate group-hover:text-purple-600 transition-colors">
-                          {event.name}
-                        </h3>
-                        <div className="flex items-center gap-2 text-slate-500 mt-1 text-xs font-medium">
-                          <MapPin className="h-3 w-3 text-purple-500" />
-                          <span className="truncate">{event.venue}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-                        <span>Completed On</span>
-                        <span className="text-slate-600">
-                          {new Date(event.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-                        <span>Final Progress</span>
-                        <span className="text-purple-600">100%</span>
-                      </div>
-                      <Progress value={100} className="h-2 bg-slate-100" />
-                      {activeTab === "assigned" &&
-                        event.completed_vendors &&
-                        event.completed_vendors.length > 0 && (
-                          <div className="pt-3 mt-3 border-t border-slate-200 space-y-2">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                              Rate vendors
-                            </p>
-                            {event.completed_vendors.map((v) => {
-                              const reviewed =
-                                assignedReviewByEvent[event.id]?.my_organizer_to_vendor?.[String(v.id)]
-                              if (reviewed) {
-                                return (
-                                  <p
-                                    key={v.id}
-                                    className="text-xs font-bold text-emerald-600"
-                                  >
-                                    Reviewed {v.name}
-                                  </p>
-                                )
-                              }
-                              return (
-                                <Button
-                                  key={v.id}
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full rounded-xl border-amber-200 bg-amber-50/80 text-amber-900 hover:bg-amber-100 font-black text-[10px] uppercase tracking-widest gap-2"
-                                  onClick={() =>
-                                    setVendorReviewDialog({
-                                      eventId: event.id,
-                                      vendorId: v.id,
-                                      vendorName: v.name,
-                                    })
-                                  }
-                                >
-                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
-                                  Rate {v.name}
-                                </Button>
-                              )
-                            })}
-                          </div>
-                        )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            {activeTab === "assigned" ? (
+              <AssignedSectionHeader
+                title="Completed assigned projects"
+                showViewAll={showCompletedViewAll}
+                href={completedViewAllHref}
+              />
+            ) : (
+              <h2 className="text-lg font-bold text-slate-900">Completed Personal Projects</h2>
+            )}
+            {completedDisplay.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {completedDisplay.map((event) => (
+                  <OrganizerCompletedEventCard
+                    key={event.id}
+                    event={event}
+                    showVendorSection={activeTab === "assigned"}
+                    assignedReviewByEvent={assignedReviewByEvent}
+                    onOpenReview={setVendorReviewDialog}
+                  />
+                ))}
+              </div>
+            ) : (
+              activeTab === "assigned" && (
+                <div className="rounded-[32px] border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
+                  <p className="text-sm font-semibold text-slate-600">
+                    No completed assigned projects match the selected event date range. Adjust the dates or clear the filter.
+                  </p>
+                </div>
+              )
+            )}
           </div>
         )}
 

@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import ChatMessage, User, Event, db
+from app.models import ChatMessage, User, Event, db, vendor_events
 from datetime import datetime
 from sqlalchemy import or_, and_
 import os
@@ -245,7 +245,15 @@ def get_organizer_all_conversations():
         ).all()
 
         for event in managed_events:
-            for vendor in event.assigned_vendors:
+            convo_vendors = (
+                User.query.join(vendor_events, User.id == vendor_events.c.vendor_id)
+                .filter(
+                    vendor_events.c.event_id == event.id,
+                    vendor_events.c.partnership_status.in_(["pending", "accepted"]),
+                )
+                .all()
+            )
+            for vendor in convo_vendors:
                 last_msg = ChatMessage.query.filter_by(event_id=event.id).filter(
                     or_(
                         and_(ChatMessage.sender_id == vendor.id, ChatMessage.receiver_id == current_user_id),

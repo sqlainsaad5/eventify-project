@@ -41,43 +41,18 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { OrganizerProfileSheet } from "@/app/(user)/my-events/_components/organizer-profile-sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import {
+    availabilityBadgeClass,
+    availabilityLabel,
+    getHostRatingDisplay,
+    normalizeAvailability,
+    type OrganizerRatingSummaries,
+} from "@/app/(user)/my-events/_lib/organizer-display"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-
-type RatingSide = { avg: number | null; count: number }
-
-type AvailabilityCode = "available" | "limited" | "unavailable"
-
-function normalizeAvailability(a: string | undefined | null): AvailabilityCode {
-    const v = (a || "available").toLowerCase()
-    if (v === "limited" || v === "unavailable") return v
-    return "available"
-}
-
-function availabilityLabel(code: AvailabilityCode) {
-    switch (code) {
-        case "limited":
-            return "Limited availability"
-        case "unavailable":
-            return "Not accepting new events"
-        default:
-            return "Available"
-    }
-}
-
-function availabilityBadgeClass(code: AvailabilityCode) {
-    switch (code) {
-        case "limited":
-            return "bg-amber-100 text-amber-900 border-amber-200/80"
-        case "unavailable":
-            return "bg-rose-100 text-rose-900 border-rose-200/80"
-        default:
-            return "bg-emerald-100 text-emerald-900 border-emerald-200/80"
-    }
-}
 
 export default function EventDetailsPage() {
     const router = useRouter()
@@ -105,9 +80,7 @@ export default function EventDetailsPage() {
     const [loadingOrganizers, setLoadingOrganizers] = useState(true)
     const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null)
     const [postForApplications, setPostForApplications] = useState(false)
-    const [organizerSummaries, setOrganizerSummaries] = useState<
-        Record<number, { organizer: RatingSide; vendor: RatingSide }>
-    >({})
+    const [organizerSummaries, setOrganizerSummaries] = useState<OrganizerRatingSummaries>({})
     const [organizerPickerOpen, setOrganizerPickerOpen] = useState(false)
     const [organizerSearch, setOrganizerSearch] = useState("")
     const [organizerDetailView, setOrganizerDetailView] = useState<any | null>(null)
@@ -134,19 +107,6 @@ export default function EventDetailsPage() {
         if (organizerPickerOpen) setOrganizerSearch("")
     }, [organizerPickerOpen])
 
-    const getRatingParts = (org: any) => {
-        const cnt = org.host_rating_count ?? 0
-        const avg = org.host_rating_avg
-        if (cnt > 0 && avg != null) {
-            return { avg: Number(avg), count: cnt }
-        }
-        const s = organizerSummaries[org.id]?.organizer
-        if (s && s.count > 0) {
-            return { avg: s.avg != null ? Number(s.avg) : null, count: s.count }
-        }
-        return { avg: null as number | null, count: 0 }
-    }
-
     const loadOrganizerSummaries = async (orgs: { id: number }[]) => {
         if (!orgs.length) return
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
@@ -163,7 +123,7 @@ export default function EventDetailsPage() {
             if (!res.ok) return
             const data = await res.json()
             const summaries = data.summaries || {}
-            const map: Record<number, { organizer: RatingSide; vendor: RatingSide }> = {}
+            const map: OrganizerRatingSummaries = {}
             for (const key of Object.keys(summaries)) {
                 map[Number(key)] = summaries[key]
             }
@@ -417,7 +377,7 @@ export default function EventDetailsPage() {
                             <div className="px-8 pt-8 pb-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                                 <div>
                                     <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                                        <Users className="h-5 w-5 text-indigo-600" /> 1. Select Your Event Expert
+                                        <Users className="h-5 w-5 text-indigo-600" /> 1. Select Your Organizer
                                     </h2>
                                     <p className="text-sm text-slate-400 font-medium mt-1 uppercase tracking-widest text-[10px] font-black">Choose now or let organizers apply</p>
                                 </div>
@@ -525,7 +485,7 @@ export default function EventDetailsPage() {
                                                             </div>
                                                             <p className="text-sm text-slate-600">
                                                                 {(() => {
-                                                                    const rp = getRatingParts(selectedOrganizer)
+                                                                    const rp = getHostRatingDisplay(selectedOrganizer, organizerSummaries)
                                                                     if (rp.count > 0 && rp.avg != null) {
                                                                         return (
                                                                             <>
@@ -627,7 +587,7 @@ export default function EventDetailsPage() {
                                                                     org.organizer_availability,
                                                                 )
                                                                 const canSelect = av !== "unavailable"
-                                                                const rp = getRatingParts(org)
+                                                                const rp = getHostRatingDisplay(org, organizerSummaries)
                                                                 const isSelected = selectedOrgId === org.id
                                                                 return (
                                                                     <div
@@ -764,141 +724,21 @@ export default function EventDetailsPage() {
                                             </DialogContent>
                                         </Dialog>
 
-                                        <Sheet
+                                        <OrganizerProfileSheet
                                             open={organizerDetailView != null}
                                             onOpenChange={(open) => {
                                                 if (!open) setOrganizerDetailView(null)
                                             }}
-                                        >
-                                            <SheetContent
-                                                side="right"
-                                                className="w-full sm:max-w-lg overflow-y-auto border-slate-200"
-                                            >
-                                                {organizerDetailView ? (
-                                                    <>
-                                                        <SheetHeader className="text-left space-y-1 pr-8">
-                                                            <SheetTitle className="text-xl font-black tracking-tight">
-                                                                {organizerDetailView.name || "Organizer"}
-                                                            </SheetTitle>
-                                                            <SheetDescription>
-                                                                Full profile, ratings, and package notes for this expert.
-                                                            </SheetDescription>
-                                                        </SheetHeader>
-                                                        {(() => {
-                                                            const org = organizerDetailView
-                                                            const av = normalizeAvailability(org.organizer_availability)
-                                                            const canSelect = av !== "unavailable"
-                                                            const rp = getRatingParts(org)
-                                                            const vr = organizerSummaries[org.id]?.vendor
-                                                            return (
-                                                                <div className="space-y-6 px-4 pb-8">
-                                                                    <Avatar className="h-24 w-24 rounded-2xl shadow-lg ring-2 ring-slate-100">
-                                                                        <AvatarImage
-                                                                            src={org.profile_image || undefined}
-                                                                            alt={org.name || "Organizer"}
-                                                                            className="object-cover"
-                                                                        />
-                                                                        <AvatarFallback className="rounded-2xl text-2xl font-black bg-indigo-600 text-white">
-                                                                            {(org.name || "?")[0].toUpperCase()}
-                                                                        </AvatarFallback>
-                                                                    </Avatar>
-                                                                    <Badge
-                                                                        variant="outline"
-                                                                        className={cn(
-                                                                            "text-[10px] font-black uppercase tracking-widest border",
-                                                                            availabilityBadgeClass(av),
-                                                                        )}
-                                                                    >
-                                                                        {availabilityLabel(av)}
-                                                                    </Badge>
-                                                                    <div className="space-y-1">
-                                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                                            Location & focus
-                                                                        </p>
-                                                                        <p className="text-sm font-bold text-slate-800">
-                                                                            {[org.city, org.category].filter(Boolean).join(" · ") ||
-                                                                                "Not specified"}
-                                                                        </p>
-                                                                    </div>
-                                                                    <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                                            Host reviews
-                                                                        </p>
-                                                                        {rp.count > 0 && rp.avg != null ? (
-                                                                            <p className="text-sm text-slate-700">
-                                                                                <span className="font-black text-amber-600 tabular-nums text-lg">
-                                                                                    {rp.avg.toFixed(1)}
-                                                                                </span>
-                                                                                <span className="text-slate-600">
-                                                                                    {" "}
-                                                                                    ★ average from {rp.count} client review
-                                                                                    {rp.count === 1 ? "" : "s"} (hosts who booked this organizer).
-                                                                                </span>
-                                                                            </p>
-                                                                        ) : (
-                                                                            <p className="text-sm text-slate-500 italic">
-                                                                                No published host reviews yet.
-                                                                            </p>
-                                                                        )}
-                                                                    </div>
-                                                                    {vr && vr.count > 0 && vr.avg != null && (
-                                                                        <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                                                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                                                Vendor-side reviews
-                                                                            </p>
-                                                                            <p className="text-sm text-slate-700">
-                                                                                <span className="font-black text-indigo-600 tabular-nums text-lg">
-                                                                                    {Number(vr.avg).toFixed(1)}
-                                                                                </span>
-                                                                                <span className="text-slate-600">
-                                                                                    {" "}
-                                                                                    ★ from {vr.count} review
-                                                                                    {vr.count === 1 ? "" : "s"} (as a vendor partner).
-                                                                                </span>
-                                                                            </p>
-                                                                        </div>
-                                                                    )}
-                                                                    <div className="space-y-2">
-                                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                                            Package & services summary
-                                                                        </p>
-                                                                        <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
-                                                                            {org.organizer_package_summary?.trim() ? (
-                                                                                org.organizer_package_summary
-                                                                            ) : (
-                                                                                <span className="text-slate-500 italic">
-                                                                                    This organizer has not added a package summary yet.
-                                                                                </span>
-                                                                            )}
-                                                                        </p>
-                                                                    </div>
-                                                                    <div className="flex flex-col gap-2 pt-2">
-                                                                        <Button
-                                                                            type="button"
-                                                                            className="rounded-xl font-black uppercase tracking-widest text-[10px] bg-indigo-600 hover:bg-indigo-700"
-                                                                            disabled={!canSelect}
-                                                                            onClick={() => {
-                                                                                if (!canSelect) return
-                                                                                setSelectedOrgId(org.id)
-                                                                                setOrganizerDetailView(null)
-                                                                                setOrganizerPickerOpen(false)
-                                                                            }}
-                                                                        >
-                                                                            Select this organizer
-                                                                        </Button>
-                                                                        {!canSelect && (
-                                                                            <p className="text-xs text-rose-600 font-bold text-center">
-                                                                                Not accepting new events — choose another organizer.
-                                                                            </p>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            )
-                                                        })()}
-                                                    </>
-                                                ) : null}
-                                            </SheetContent>
-                                        </Sheet>
+                                            org={organizerDetailView}
+                                            organizerSummaries={organizerSummaries}
+                                            primaryLabel="Select this organizer"
+                                            onPrimary={() => {
+                                                if (!organizerDetailView) return
+                                                setSelectedOrgId(organizerDetailView.id)
+                                                setOrganizerDetailView(null)
+                                                setOrganizerPickerOpen(false)
+                                            }}
+                                        />
                                     </>
                                 )}
                             </div>

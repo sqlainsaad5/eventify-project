@@ -21,6 +21,19 @@ export interface EventReviewStatus {
     my_user_to_organizer: Record<string, unknown> | null
 }
 
+/** Public organizer card shape (matches GET /api/auth/organizers items and application `organizer_profile`). */
+export interface OrganizerProfileRow {
+    id: number
+    name?: string | null
+    city?: string | null
+    category?: string | null
+    profile_image?: string | null
+    organizer_availability?: string | null
+    organizer_package_summary?: string | null
+    host_rating_avg?: number | null
+    host_rating_count?: number | null
+}
+
 export interface EventApplicationRow {
     id: number
     event_id: number
@@ -30,6 +43,7 @@ export interface EventApplicationRow {
     message: string | null
     status: string
     created_at: string | null
+    organizer_profile?: OrganizerProfileRow | null
 }
 
 export interface OrganizerRequest {

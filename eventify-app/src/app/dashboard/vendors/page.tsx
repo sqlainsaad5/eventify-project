@@ -59,6 +59,8 @@ interface Vendor {
   rating_count?: number;
   assigned_events: any[];
   assigned_events_count: number;
+  /** Partnership requests not yet accepted by the vendor */
+  pending_partnership_count?: number;
 }
 
 interface ChatMessage {
@@ -105,6 +107,19 @@ interface ServicePackage {
   price: number;
   duration: string;
   features: string[];
+}
+
+/** Eligible project not already pending or accepted with this vendor */
+function isEventOpenForPartnership(
+  vendor: Pick<Vendor, "assigned_events"> | null | undefined,
+  event: { id: number }
+) {
+  const list = Array.isArray(vendor?.assigned_events) ? vendor.assigned_events : [];
+  return !list.some(
+    (ae: { id: number; partnership_status?: string }) =>
+      ae.id === event.id &&
+      (ae.partnership_status === "pending" || ae.partnership_status === "accepted")
+  );
 }
 
 // Debounce hook for performance
@@ -510,12 +525,12 @@ function VendorsPageContent() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast({ title: "Vendor Assigned", description: data.message });
+        toast({ title: "Partnership request sent", description: data.message || "The vendor can accept it from their dashboard." });
         setAssignModalOpen(false);
         setSelectedEvent("");
         loadVendors();
       } else {
-        toast({ title: "Assignment Failed", description: data.error || "Failed to assign vendor", variant: "destructive" });
+        toast({ title: "Request could not be sent", description: data.error || "Try again in a moment.", variant: "destructive" });
       }
     } catch (err) {
       toast({ title: "Something went wrong", variant: "destructive" });
@@ -664,21 +679,36 @@ function VendorsPageContent() {
                           <Phone className="h-3 w-3" /> {vendor.phone}
                         </div>
                       </div>
-                      {vendor.assigned_events_count > 0 && (
+                      {(vendor.assigned_events_count > 0 || (vendor.pending_partnership_count || 0) > 0) && (
                         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-2">
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Jobs</span>
-                            <Badge variant="secondary" className="bg-white border-slate-100 text-purple-700 font-black">
-                              {vendor.assigned_events_count}
-                            </Badge>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Partnerships</span>
+                            <div className="flex items-center gap-1.5">
+                              {vendor.assigned_events_count > 0 ? (
+                                <Badge variant="secondary" className="bg-white border-slate-100 text-purple-700 font-black">
+                                  {vendor.assigned_events_count} confirmed
+                                </Badge>
+                              ) : null}
+                              {(vendor.pending_partnership_count || 0) > 0 ? (
+                                <Badge variant="secondary" className="bg-amber-50 border-amber-100 text-amber-800 font-black text-[9px]">
+                                  {vendor.pending_partnership_count} pending
+                                </Badge>
+                              ) : null}
+                            </div>
                           </div>
                           {Array.isArray(vendor.assigned_events) && vendor.assigned_events
-                            .filter((ae: any) => ae.completed && !ae.verified)
+                            .filter(
+                              (ae: { completed?: boolean; verified?: boolean; partnership_status?: string }) =>
+                                ae.partnership_status === "accepted" && ae.completed && !ae.verified
+                            )
                             .length > 0 && (
                             <div className="pt-2 border-t border-slate-100 space-y-1.5">
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Verify work</span>
                               {vendor.assigned_events
-                                .filter((ae: any) => ae.completed && !ae.verified)
+                                .filter(
+                                  (ae: { completed?: boolean; verified?: boolean; partnership_status?: string }) =>
+                                    ae.partnership_status === "accepted" && ae.completed && !ae.verified
+                                )
                                 .map((ae: any) => (
                                   <div key={ae.id} className="flex items-center justify-between gap-2">
                                     <span className="text-xs font-medium text-slate-700 truncate">{ae.name}</span>
@@ -728,7 +758,9 @@ function VendorsPageContent() {
                       </Button>
                       <Button
                         variant="outline"
-                        disabled={vendor.assigned_events_count === 0}
+                        disabled={
+                          (vendor.assigned_events_count || 0) === 0 && (vendor.pending_partnership_count || 0) === 0
+                        }
                         className="relative rounded-xl h-10 border-slate-200 hover:bg-slate-50 hover:text-purple-600 group/btn"
                         onClick={async () => {
                           await fetchChatMessages(vendor.id);
@@ -816,7 +848,10 @@ function VendorsPageContent() {
                             )}
                           </div>
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            {vendor.assigned_events_count} active jobs
+                            {vendor.assigned_events_count} confirmed
+                            {(vendor.pending_partnership_count || 0) > 0
+                              ? ` · ${vendor.pending_partnership_count} pending`
+                              : ""}
                           </div>
                         </div>
                       </td>
@@ -848,7 +883,9 @@ function VendorsPageContent() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            disabled={vendor.assigned_events_count === 0}
+                            disabled={
+                              (vendor.assigned_events_count || 0) === 0 && (vendor.pending_partnership_count || 0) === 0
+                            }
                             className="relative h-9 w-9 p-0 rounded-xl hover:bg-white hover:shadow-md hover:text-purple-600 border border-transparent hover:border-slate-100 group/btn"
                             onClick={async () => {
                               await fetchChatMessages(vendor.id);
@@ -897,9 +934,9 @@ function VendorsPageContent() {
       <Dialog open={assignModalOpen} onOpenChange={setAssignModalOpen}>
         <DialogContent className="rounded-[40px] border-none shadow-2xl p-8 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight">Assign {selectedVendor?.name}</DialogTitle>
+            <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight">Request partnership: {selectedVendor?.name}</DialogTitle>
             <DialogDescription className="text-slate-500 font-medium">
-              Bridge the partnership by assigning this elite vendor to one of your live projects.
+              The vendor must accept before the partnership is confirmed. Choose one of your projects (advance payment must be complete for that event).
             </DialogDescription>
           </DialogHeader>
 
@@ -911,15 +948,14 @@ function VendorsPageContent() {
                   <SelectValue placeholder="Select an event ecosystem" />
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl border-slate-100 shadow-xl">
-                  {organizerEvents.filter(event =>
-                    !selectedVendor?.assigned_events?.some((ae: any) => ae.id === event.id)
-                  ).length === 0 ? (
+                  {organizerEvents.filter((event) => isEventOpenForPartnership(selectedVendor, event))
+                  .length === 0 ? (
                     <div className="p-4 text-center text-xs text-slate-400 font-bold uppercase tracking-widest">
-                      No eligible projects found. Create a project in \"Your Events\" or choose a vendor who is not already assigned.
+                      No eligible projects found. Create a project in "Your Events", or all open projects are already with this vendor.
                     </div>
                   ) : (
                     organizerEvents
-                      .filter(event => !selectedVendor?.assigned_events?.some((ae: any) => ae.id === event.id))
+                      .filter((event) => isEventOpenForPartnership(selectedVendor, event))
                       .map((event) => (
                         <SelectItem key={event.id} value={String(event.id)} className="rounded-xl py-3 font-medium">
                           {event.name}
@@ -938,7 +974,7 @@ function VendorsPageContent() {
               disabled={!selectedEvent}
               onClick={() => handleAssignVendor(selectedVendor?.id!)}
             >
-              Confirm Partnership
+              Send request
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -946,7 +982,10 @@ function VendorsPageContent() {
 
       {/* Services Dialog */}
       <Dialog open={servicesDialogOpen} onOpenChange={setServicesDialogOpen}>
-        <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col rounded-[40px] border-none shadow-2xl p-0">
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-4xl max-h-[85vh] overflow-hidden flex flex-col rounded-[40px] border-none shadow-2xl p-0"
+        >
           <DialogHeader className="sr-only">
             <DialogTitle>Vendor Services - {currentVendorForServices?.name}</DialogTitle>
             <DialogDescription>List of services and packages offered by the vendor</DialogDescription>
@@ -1036,7 +1075,10 @@ function VendorsPageContent() {
 
       {/* Chat Dialog */}
       <Dialog open={chatDialogOpen} onOpenChange={setChatDialogOpen}>
-        <DialogContent className="sm:max-w-2xl h-[650px] flex flex-col rounded-[40px] border-none shadow-2xl p-0 overflow-hidden">
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-2xl h-[650px] flex flex-col rounded-[40px] border-none shadow-2xl p-0 overflow-hidden"
+        >
           <DialogHeader className="sr-only">
             <DialogTitle>Chat with {selectedConversation?.vendor_name}</DialogTitle>
             <DialogDescription>Message history and communication hub</DialogDescription>

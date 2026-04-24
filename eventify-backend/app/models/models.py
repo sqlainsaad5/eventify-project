@@ -1,13 +1,17 @@
 from app.extensions import db
 from passlib.hash import bcrypt
-from datetime import datetime 
+from datetime import datetime
+from sqlalchemy import and_, func
 
 
 # Association table for vendor-event assignments
+# partnership_status: pending (awaiting vendor) | accepted | rejected
 vendor_events = db.Table('vendor_events',
     db.Column('vendor_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
     db.Column('event_id', db.Integer, db.ForeignKey('event.id'), primary_key=True),
-    db.Column('assigned_at', db.DateTime, default=db.func.current_timestamp())
+    db.Column('assigned_at', db.DateTime, default=db.func.current_timestamp()),
+    db.Column('partnership_status', db.String(20), nullable=False, server_default='accepted'),
+    db.Column('partnership_confirmed_at', db.DateTime, nullable=True),
 )
 
 vendor_completed_events = db.Table('vendor_completed_events',
@@ -18,6 +22,21 @@ vendor_completed_events = db.Table('vendor_completed_events',
 
 from itsdangerous import URLSafeTimedSerializer
 from flask import current_app
+
+
+def get_vendor_event_partnership_status(vendor_id, event_id):
+    """Row in vendor_events for (vendor, event), or None if not linked."""
+    if vendor_id is None or event_id is None:
+        return None
+    return (
+        db.session.query(vendor_events.c.partnership_status)
+        .filter(
+            vendor_events.c.vendor_id == vendor_id,
+            vendor_events.c.event_id == event_id,
+        )
+        .scalar()
+    )
+
 
 class User(db.Model):
     __tablename__ = "user"
@@ -75,6 +94,11 @@ class User(db.Model):
         return email
 
     def to_dict(self):
+        events_out = []
+        for event in self.assigned_events or []:
+            if self.role == "vendor" and get_vendor_event_partnership_status(self.id, event.id) != "accepted":
+                continue
+            events_out.append(event.to_dict())
         return {
             "id": self.id,
             "name": self.name,
@@ -89,7 +113,7 @@ class User(db.Model):
             "is_verified": self.is_verified,  # ✅ include in API responses
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "assigned_events": [event.to_dict() for event in self.assigned_events] if self.assigned_events else [],
+            "assigned_events": events_out,
         }
 
 
@@ -127,6 +151,24 @@ class Event(db.Model):
     organizer = db.relationship('User', foreign_keys=[organizer_id], backref='events_organized')
 
     def to_dict(self):
+        # Only vendors who accepted the partnership count as "assigned" for most UI.
+        accepted_on_event = (
+            User.query.join(vendor_events, User.id == vendor_events.c.vendor_id)
+            .filter(
+                vendor_events.c.event_id == self.id,
+                vendor_events.c.partnership_status == "accepted",
+            )
+            .all()
+        )
+        pending_count = (
+            db.session.query(func.count(vendor_events.c.vendor_id))
+            .filter(
+                vendor_events.c.event_id == self.id,
+                vendor_events.c.partnership_status == "pending",
+            )
+            .scalar()
+            or 0
+        )
         return {
             "id": self.id,
             "name": self.name,
@@ -147,8 +189,9 @@ class Event(db.Model):
             "organizer_id": self.organizer_id,
             "organizer_name": self.organizer.name if self.organizer else None,
             "organizer_status": self.organizer_status,
-            "assigned_vendors": [vendor.name for vendor in self.assigned_vendors.all()],
-            "assigned_vendor_ids": [v.id for v in self.assigned_vendors.all()],
+            "assigned_vendors": [vendor.name for vendor in accepted_on_event],
+            "assigned_vendor_ids": [v.id for v in accepted_on_event],
+            "partnership_pending_count": int(pending_count or 0),
             "completed_vendor_ids": [v.id for v in self.completed_by_vendors.all()],
             "completed_vendors": [
                 {"id": v.id, "name": v.name or "Vendor"} for v in self.completed_by_vendors.all()

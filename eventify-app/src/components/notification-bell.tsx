@@ -107,6 +107,8 @@ export function NotificationBell() {
             } else if (n.extra_data?.action === "vendor_work_verification" && role === "organizer") {
                 const vendorId = n.extra_data?.vendor_id
                 router.push(`/dashboard/vendors${vendorId ? `?vendorId=${vendorId}` : ""}`)
+            } else if (role === "user" && n.extra_data?.action === "view_applications" && n.extra_data?.event_id) {
+                router.push(`/my-events?applications=${n.extra_data.event_id}`)
             } else if (n.extra_data?.event_id) {
                 if (role === "user") {
                     router.push("/my-events")

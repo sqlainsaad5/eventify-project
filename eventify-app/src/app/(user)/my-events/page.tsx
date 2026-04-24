@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo } from "react"
+import { Suspense, useMemo, useEffect, useRef } from "react"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Calendar, Loader2, Plus, Target, ArrowRight } from "lucide-react"
 import { useMyEventsDashboard } from "./_lib/use-my-events-dashboard"
@@ -10,7 +11,30 @@ import { MY_EVENTS_PREVIEW_LIMIT } from "./_lib/constants"
 import { UserActiveCompletedEventCard, UserCanceledEventCard } from "./_components/user-event-cards"
 import { MyEventsModals } from "./_components/my-events-modals"
 
-export default function MyEventsPage() {
+function ApplicationsQueryHandler({ onOpen }: { onOpen: (id: number) => void }) {
+    const searchParams = useSearchParams()
+    const router = useRouter()
+    const lastQuery = useRef<string | null>(null)
+    useEffect(() => {
+        const q = searchParams.get("applications")
+        if (!q) {
+            lastQuery.current = null
+            return
+        }
+        if (lastQuery.current === q) return
+        lastQuery.current = q
+        const id = parseInt(q, 10)
+        if (!Number.isFinite(id) || id <= 0) {
+            router.replace("/my-events", { scroll: false })
+            return
+        }
+        void onOpen(id)
+        router.replace("/my-events", { scroll: false })
+    }, [searchParams, router, onOpen])
+    return null
+}
+
+function MyEventsPageContent() {
     const dash = useMyEventsDashboard()
     const { activeEvents, completedEvents, canceledEvents } = useMemo(
         () => partitionUserEvents(dash.events),
@@ -24,6 +48,7 @@ export default function MyEventsPage() {
 
     return (
         <div className="font-sans pb-8">
+            <ApplicationsQueryHandler onOpen={dash.openApplicationsModal} />
             <div
                 className="py-16 text-center text-white relative overflow-hidden"
                 style={{ background: "linear-gradient(135deg,#6366f1 0%,#a855f7 50%,#ec4899 100%)" }}
@@ -156,11 +181,26 @@ export default function MyEventsPage() {
                 applications={dash.applications}
                 loadingApplications={dash.loadingApplications}
                 assigningOrganizerId={dash.assigningOrganizerId}
+                applicationOrganizerSummaries={dash.applicationOrganizerSummaries}
                 onAssign={dash.handleAssignOrganizer}
                 reviewDialog={dash.reviewDialog}
                 setReviewDialog={dash.setReviewDialog}
                 onSubmitReview={dash.submitReview}
             />
         </div>
+    )
+}
+
+export default function MyEventsPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="font-sans pb-8 min-h-[40vh] flex items-center justify-center">
+                    <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
+                </div>
+            }
+        >
+            <MyEventsPageContent />
+        </Suspense>
     )
 }

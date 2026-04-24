@@ -1,113 +1,72 @@
 "use client"
 import { DashboardLayout } from "@/components/dashboard-layout"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  Loader2,
-  DollarSign,
-  Calendar,
-  CheckCircle,
-  XCircle,
-  RefreshCw,
-  History,
-  Briefcase,
-  ShieldCheck,
-  CreditCard,
-  Clock,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Wallet
-} from "lucide-react"
-import { Progress } from "@/components/ui/progress"
+import { Loader2, History, Briefcase, ShieldCheck } from "lucide-react"
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal"
 import { ReviewDialog } from "@/components/review-dialog"
 import { toast } from "sonner"
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-
-interface Payment {
-  id: number
-  event_id: number
-  amount: number
-  currency: string
-  status: string
-  payment_method: string
-  transaction_id: string
-  payment_date: string
-  created_at: string
-  event_name: string
-}
-
-interface Event {
-  id: number
-  name: string
-  budget: number
-  payment_status: "unpaid" | "deposit_paid" | "partially_paid" | "fully_paid"
-  deposit_amount?: number
-  vendor_payments_total?: number
-  total_spent?: number
-  organizer_id?: number | null
-   organizer_advance_paid?: boolean
-   organizer_final_requested?: boolean
-   organizer_final_paid?: boolean
-   status?: string
-}
-
-interface PaymentRequest {
-  id: number
-  event_id: number
-  vendor_id: number
-  vendor_name: string
-  amount: number
-  status: "pending" | "approved" | "rejected" | "paid"
-  description: string
-  created_at: string
-  event_name: string
-}
-
-interface OrganizerPaymentRequest {
-  id: number
-  event_id: number
-  event_name: string
-  organizer_id: number
-  organizer_name: string
-  amount: number
-  currency: string
-  description: string
-  status: "pending" | "paid" | "rejected"
-  created_at: string
-  paid_at: string | null
-}
-
-interface AppNotification {
-  id: number
-  is_read: boolean
-  extra_data?: {
-    action?: string
-  }
-}
+import { usePaymentWorkflowData } from "./_lib/use-payment-workflow-data"
+import { DASHBOARD_PAYMENT_PREVIEW_LIMIT } from "./_lib/constants"
+import {
+  sortEventsForFundingRecent,
+  sortPaymentRequestsRecent,
+  sortEventsByIdDesc,
+  sortOrganizerPaymentRequestsRecent,
+} from "./_lib/payment-sort-helpers"
+import { PaymentWorkflowSectionHeader } from "./_components/payment-workflow-section-header"
+import { EventFundingGrid } from "./_components/event-funding-grid"
+import { VendorPayoutCard } from "./_components/vendor-payout-card"
+import { TransactionHistoryDialog } from "./_components/transaction-history-dialog"
+import type { AppNotification } from "./_lib/payment-workflow-types"
 
 export default function PaymentsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [payments, setPayments] = useState<Payment[]>([])
-  const [events, setEvents] = useState<Event[]>([])
-  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([])
-  const [organizerRequests, setOrganizerRequests] = useState<OrganizerPaymentRequest[]>([])
-  const [loading, setLoading] = useState(true)
+  const {
+    payments,
+    events,
+    paymentRequests,
+    organizerRequests,
+    loadData,
+    loading,
+    notifications,
+    API_BASE,
+    getToken,
+  } = usePaymentWorkflowData()
+  const allParam = searchParams.get("all")
+  const showAllFunding = allParam === "funding"
+  const showAllPayouts = allParam === "payouts"
+  const showAllOrganizer = allParam === "organizer"
+  const eventsSorted = useMemo(
+    () => [...events].sort(sortEventsForFundingRecent),
+    [events]
+  )
+  const eventsPreview = useMemo(
+    () => (showAllFunding ? eventsSorted : eventsSorted.slice(0, DASHBOARD_PAYMENT_PREVIEW_LIMIT)),
+    [showAllFunding, eventsSorted]
+  )
+  const paymentRequestsSorted = useMemo(
+    () => [...paymentRequests].sort(sortPaymentRequestsRecent),
+    [paymentRequests]
+  )
+  const paymentRequestsPreview = useMemo(
+    () =>
+      showAllPayouts
+        ? paymentRequestsSorted
+        : paymentRequestsSorted.slice(0, DASHBOARD_PAYMENT_PREVIEW_LIMIT),
+    [showAllPayouts, paymentRequestsSorted]
+  )
   const [processing, setProcessing] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<"payments" | "requests" | "organizer">("payments")
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
   const [currentClientSecret, setCurrentClientSecret] = useState("")
   const [currentAmount, setCurrentAmount] = useState(0)
   const [currentPaymentId, setCurrentPaymentId] = useState<number | null>(null)
-  const [organizerForm, setOrganizerForm] = useState({ event_id: "", amount: "", description: "Coordination fee" })
-  const [organizerSubmitting, setOrganizerSubmitting] = useState(false)
   const [completingEventId, setCompletingEventId] = useState<number | null>(null)
-  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [organizerRatingPrompt, setOrganizerRatingPrompt] = useState<{
     eventId: number
     organizerId: number
@@ -120,8 +79,8 @@ export default function PaymentsPage() {
     vendorName: string
     eventName: string
   } | null>(null)
+  const [transactionHistoryOpen, setTransactionHistoryOpen] = useState(false)
 
-  const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, '').trim()
   const getUserId = (): number | null => {
     try {
       const u = localStorage.getItem("user")
@@ -131,66 +90,25 @@ export default function PaymentsPage() {
     } catch { return null }
   }
 
-  // Clear organizer form event selection if that event is already paid or fully paid (e.g. after refetch)
-  useEffect(() => {
-    const paidEventIds = organizerRequests.filter((r) => r.status === "paid").map((r) => r.event_id)
-    if (organizerForm.event_id && paidEventIds.includes(parseInt(organizerForm.event_id, 10))) {
-      setOrganizerForm((f) => ({ ...f, event_id: "", amount: "", description: "Coordination fee" }))
-      return
-    }
-    const eid = organizerForm.event_id ? parseInt(organizerForm.event_id, 10) : 0
-    const ev = events.find((e: any) => e.id === eid)
-    if (ev && ev.organizer_advance_paid && ev.organizer_final_paid) {
-      setOrganizerForm((f) => ({ ...f, event_id: "", amount: "", description: "Coordination fee" }))
-    }
-  }, [organizerRequests, events, organizerForm.event_id])
-
-  const loadData = async () => {
-    const token = getToken()
-    if (!token) return router.push("/login")
-
-    try {
-      setLoading(true)
-      const [eventsRes, paymentsRes, requestsRes, orgRequestsRes, notificationsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/payments/events-with-payment-status`, { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch(`${API_BASE}/api/payments`, { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch(`${API_BASE}/api/payments/requests`, { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch(`${API_BASE}/api/payments/organizer-requests`, { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch(`${API_BASE}/api/payments/notifications`, { headers: { "Authorization": `Bearer ${token}` } })
-      ])
-
-      if (eventsRes.ok) setEvents(await eventsRes.json())
-      if (paymentsRes.ok) {
-        const d = await paymentsRes.json()
-        setPayments(d.payments || [])
-      }
-      if (requestsRes.ok) {
-        const d = await requestsRes.json()
-        setPaymentRequests(d.requests || [])
-      }
-      if (orgRequestsRes.ok) {
-        const d = await orgRequestsRes.json()
-        setOrganizerRequests(d.organizer_requests || [])
-      }
-      if (notificationsRes.ok) {
-        const d = await notificationsRes.json()
-        setNotifications(d.notifications || [])
-      }
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { loadData() }, [])
-
   useEffect(() => {
     const tab = searchParams.get("tab")
+    const all = searchParams.get("all")
+    if (all === "funding" && !tab) {
+      router.replace("/dashboard/payments?tab=payments&all=funding", { scroll: false })
+      return
+    }
+    if (all === "payouts" && !tab) {
+      router.replace("/dashboard/payments?tab=requests&all=payouts", { scroll: false })
+      return
+    }
+    if (all === "organizer" && !tab) {
+      router.replace("/dashboard/payments?tab=organizer&all=organizer", { scroll: false })
+      return
+    }
     if (tab === "organizer" || tab === "payments" || tab === "requests") {
       setActiveTab(tab)
     }
-  }, [searchParams])
+  }, [searchParams, router])
 
   useEffect(() => {
     if (activeTab !== "organizer") return
@@ -269,90 +187,6 @@ export default function PaymentsPage() {
     } catch (err) {
       console.error(err)
       toast.error("Error rejecting payment request")
-    }
-  }
-
-  const handleSelectOrganizerEvent = async (value: string) => {
-    setOrganizerForm((f) => ({ ...f, event_id: value, amount: "" }))
-    if (!value) return
-    const token = getToken()
-    if (!token) {
-      router.push("/login")
-      return
-    }
-    try {
-      const eid = parseInt(value, 10)
-      const res = await fetch(`${API_BASE}/api/events/${eid}/budget-summary`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => null)
-        console.error("Failed to load budget summary", d)
-        return
-      }
-      const data = await res.json()
-      const remaining = Math.max(0, data.remaining_budget ?? 0)
-      setOrganizerForm((f) => ({ ...f, event_id: value, amount: remaining.toString() }))
-    } catch (err) {
-      console.error("Error loading budget summary", err)
-    }
-  }
-
-  const handleSubmitOrganizerRequest = async () => {
-    const token = getToken()
-    const eid = organizerForm.event_id ? parseInt(organizerForm.event_id) : 0
-    const amount = parseFloat(organizerForm.amount)
-    if (!token || !eid || !amount || amount <= 0) return
-    const selectedEvent = events.find((e: any) => e.id === eid)
-    setOrganizerSubmitting(true)
-    try {
-      if (selectedEvent?.organizer_advance_paid === true && selectedEvent?.status === "completed") {
-        const res = await fetch(`${API_BASE}/api/events/${eid}/create-final-request`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
-        })
-        const data = await res.json()
-        if (res.status === 201) {
-          setOrganizerForm({ event_id: "", amount: "", description: "Coordination fee" })
-          loadData()
-          toast.success("75% payment request sent")
-        } else if (res.status === 200) {
-          loadData()
-          toast.info("A final payment request is already pending for this event")
-        } else if (res.status === 400) {
-          toast.error(data.error || "Failed to create final payment request")
-        } else {
-          toast.error(data.error || "Failed to create final payment request")
-        }
-        return
-      }
-      const res = await fetch(`${API_BASE}/api/payments/organizer-request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({
-          event_id: eid,
-          amount,
-          description: organizerForm.description || "Coordination fee"
-        })
-      })
-      const d = await res.json().catch(() => ({}))
-      if (res.ok) {
-        setOrganizerForm({ event_id: "", amount: "", description: "Coordination fee" })
-        loadData()
-      } else if (res.status === 403 && typeof d.error === "string" && d.error.includes("already been paid")) {
-        if (selectedEvent?.organizer_advance_paid === true && selectedEvent?.status !== "completed") {
-          toast.error("Mark the event as completed first, then request the remaining 75% payment.")
-        } else {
-          toast.error(d.error || "Failed to submit request")
-        }
-      } else {
-        toast.error(d.error || "Failed to submit request")
-      }
-    } catch (err) {
-      console.error(err)
-      toast.error("Failed to submit request")
-    } finally {
-      setOrganizerSubmitting(false)
     }
   }
 
@@ -483,20 +317,39 @@ export default function PaymentsPage() {
   return (
     <DashboardLayout>
       <div className="space-y-8 p-1">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-4xl font-black text-slate-900 tracking-tighter">Payment Workflow</h1>
             <p className="text-slate-500 font-medium">25% advance, completion, and 75% final settlement</p>
           </div>
-          <div className="bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-emerald-600" />
-            <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest text">Production Test Active</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setTransactionHistoryOpen(true)}
+              className="h-11 gap-2 rounded-2xl border-slate-200 font-black text-[10px] uppercase tracking-widest"
+            >
+              <History className="h-4 w-4" />
+              View Transaction History
+            </Button>
+            <div className="bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Production Test Active</span>
+            </div>
           </div>
         </div>
 
         <div className="flex gap-2 bg-white p-2 rounded-[24px] border border-slate-100 max-w-md">
-          <button onClick={() => setActiveTab("payments")} className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "payments" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>Event Funding</button>
-          <button onClick={() => setActiveTab("requests")} className={`relative flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "requests" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>
+          <button
+            onClick={() => router.push("/dashboard/payments?tab=payments", { scroll: false })}
+            className={`flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "payments" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}
+          >
+            Event Funding
+          </button>
+          <button
+            onClick={() => router.push("/dashboard/payments?tab=requests", { scroll: false })}
+            className={`relative flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "requests" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}
+          >
             Vendor Payouts
             {vendorPayoutActionCount > 0 && (
               <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-black flex items-center justify-center ${activeTab === "requests" ? "bg-white text-slate-900" : "bg-amber-500 text-white"}`}>
@@ -504,7 +357,10 @@ export default function PaymentsPage() {
               </span>
             )}
           </button>
-          <button onClick={() => setActiveTab("organizer")} className={`relative flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "organizer" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}>
+          <button
+            onClick={() => router.push("/dashboard/payments?tab=organizer", { scroll: false })}
+            className={`relative flex-1 h-10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === "organizer" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400"}`}
+          >
             Organizer Fees
             {organizerFeeActionCount > 0 && (
               <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-black flex items-center justify-center ${activeTab === "organizer" ? "bg-white text-slate-900" : "bg-violet-600 text-white"}`}>
@@ -541,52 +397,20 @@ export default function PaymentsPage() {
         </Card>
 
         {activeTab === "payments" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {events.map(event => {
-              const userId = getUserId()
-              const organizerAdvancePaid = !!event.organizer_advance_paid
-              const organizerFinalPaid = !!event.organizer_final_paid
-              const organizerFullyPaid =
-                userId != null &&
-                event.organizer_id === userId &&
-                organizerAdvancePaid &&
-                organizerFinalPaid
-              return (
-              <Card
-                key={event.id}
-                className={`rounded-[32px] border-slate-100 shadow-sm overflow-hidden p-6 transition-all border group ${
-                  organizerFullyPaid ? "opacity-85 border-slate-200 hover:shadow-lg" : "hover:shadow-2xl hover:border-purple-200"
-                }`}
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <h3 className="font-black text-slate-900 uppercase tracking-tight">{event.name}</h3>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {organizerFullyPaid && (
-                      <Badge className="bg-emerald-100 text-emerald-700 font-semibold">Fully Paid</Badge>
-                    )}
-                    {getPaymentStatusBadge(event.payment_status)}
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                    <span>Stripe Funding</span>
-                    <span>{formatCurrency(event.budget)}</span>
-                  </div>
-                  <Progress value={event.budget > 0 && event.total_spent != null ? Math.min(100, (event.total_spent / event.budget) * 100) : 0} className="h-2 bg-slate-50" />
-
-                  {event.payment_status === "unpaid" ? (
-                    <Button onClick={() => handleCreatePayment(event.id, event.budget * 0.25)} className="w-full h-12 rounded-2xl bg-slate-900 text-white font-black uppercase text-[10px] tracking-widest">
-                      {processing === event.id ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <CreditCard className="w-4 h-4 mr-2" />}
-                      Pay 25% Advance
-                    </Button>
-                  ) : (
-                    <div className="bg-emerald-50 text-emerald-600 p-4 rounded-2xl flex items-center justify-center gap-2 border border-emerald-100 italic font-bold text-sm">
-                      <CheckCircle className="h-4 w-4" /> 25% Advance Paid
-                    </div>
-                  )}
-                </div>
-              </Card>
-            )})}
+          <div className="space-y-4">
+            <PaymentWorkflowSectionHeader
+              title="Event funding"
+              showViewAll={!showAllFunding && eventsSorted.length > DASHBOARD_PAYMENT_PREVIEW_LIMIT}
+              href="/dashboard/payments?tab=payments&all=funding"
+            />
+            <EventFundingGrid
+              events={eventsPreview}
+              getUserId={getUserId}
+              formatCurrency={formatCurrency}
+              getPaymentStatusBadge={getPaymentStatusBadge}
+              onPay25={(eventId, amount) => handleCreatePayment(eventId, amount)}
+              processing={processing}
+            />
           </div>
         )}
         {activeTab === "requests" && (
@@ -601,45 +425,30 @@ export default function PaymentsPage() {
                 </p>
               </Card>
             )}
+            <PaymentWorkflowSectionHeader
+              title="Vendor payout requests"
+              showViewAll={!showAllPayouts && paymentRequestsSorted.length > DASHBOARD_PAYMENT_PREVIEW_LIMIT}
+              href="/dashboard/payments?tab=requests&all=payouts"
+            />
             {paymentRequests.length === 0 ? (
               <div className="text-center p-20 bg-slate-50 rounded-[40px] border-dashed border-2 border-slate-200">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No pending vendor payouts</p>
               </div>
             ) : (
-              paymentRequests.map(req => (
-                <Card key={req.id} className="p-6 rounded-[32px] border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
-                  <div className="flex items-center gap-4">
-                    <div className="h-14 w-14 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xl italic">
-                      {req.vendor_name[0]}
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{req.event_name}</p>
-                      <h4 className="font-black text-slate-900 text-lg tracking-tight">{req.vendor_name}</h4>
-                      <p className="text-sm text-slate-500 italic mt-0.5">"{req.description}"</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-2xl font-black text-slate-900">{formatCurrency(req.amount)}</p>
-                      {getStatusBadge(req.status)}
-                    </div>
-                    <div className="flex gap-2">
-                      {req.status === "pending" && (
-                        <>
-                          <Button onClick={() => handleApprove(req.id)} size="sm" className="h-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white border-emerald-100 border transition-all font-black text-[10px] uppercase">Approve</Button>
-                          <Button onClick={() => handleReject(req.id)} size="sm" variant="ghost" className="h-10 rounded-xl text-red-500 font-black text-[10px] uppercase">Reject</Button>
-                        </>
-                      )}
-                      {req.status === "approved" && (
-                        <Button onClick={() => handleCreatePayment(req.event_id, req.amount, req.id)} className="h-12 px-6 rounded-2xl bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-slate-200">
-                          {processing === req.id ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <ShieldCheck className="w-4 h-4 mr-2 text-emerald-400" />}
-                          Authorize Settlement
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              ))
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {paymentRequestsPreview.map((req) => (
+                  <VendorPayoutCard
+                    key={req.id}
+                    req={req}
+                    formatCurrency={formatCurrency}
+                    getStatusBadge={getStatusBadge}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onAuthorize={(eventId, amount, requestId) => handleCreatePayment(eventId, amount, requestId)}
+                    processing={processing}
+                  />
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -660,10 +469,6 @@ export default function PaymentsPage() {
               const fullyPaidEvents = myEventsAsOrganizer.filter(
                 (e: any) => e.organizer_advance_paid && e.organizer_final_paid
               )
-              const eventsEligibleForPaymentRequest = myEventsAsOrganizer.filter(
-                (e: any) => !(e.organizer_advance_paid && e.organizer_final_paid)
-              )
-
               const findFinalRequestForEvent = (eventId: number) => {
                 const ev = events.find((e: any) => e.id === eventId)
                 if (!ev || !ev.budget) return null
@@ -677,18 +482,38 @@ export default function PaymentsPage() {
                 (r) => r.status === "pending" && myEventsAsOwner.some((e: any) => e.id === r.event_id)
               )
               const myRequestsAsOrganizer = organizerRequests.filter((r) => r.organizer_id === userId)
+              const L = DASHBOARD_PAYMENT_PREVIEW_LIMIT
+              const oFull = showAllOrganizer
+              const orgAllHref = "/dashboard/payments?tab=organizer&all=organizer"
+              const advanceSorted = [...advancePaidEvents].sort(sortEventsByIdDesc)
+              const advanceToShow = oFull ? advanceSorted : advanceSorted.slice(0, L)
+              const showAdvanceViewAll = !oFull && advanceSorted.length > L
+              const pendingFinalSorted = [...pendingFinalEvents].sort(sortEventsByIdDesc)
+              const pendingFinalToShow = oFull ? pendingFinalSorted : pendingFinalSorted.slice(0, L)
+              const showPendingFinalViewAll = !oFull && pendingFinalSorted.length > L
+              const fullySorted = [...fullyPaidEvents].sort(sortEventsByIdDesc)
+              const fullyToShow = oFull ? fullySorted : fullySorted.slice(0, L)
+              const showFullyViewAll = !oFull && fullySorted.length > L
+              const pendingForMeSorted = [...pendingForMe].sort(sortOrganizerPaymentRequestsRecent)
+              const pendingForMeToShow = oFull ? pendingForMeSorted : pendingForMeSorted.slice(0, L)
+              const showPendingForMeViewAll = !oFull && pendingForMeSorted.length > L
+              const myReqSorted = [...myRequestsAsOrganizer].sort(sortOrganizerPaymentRequestsRecent)
+              const myReqToShow = oFull ? myReqSorted : myReqSorted.slice(0, L)
+              const showMyReqViewAll = !oFull && myReqSorted.length > L
               return (
                 <>
                   {/* Organizer payment workflow sections */}
                   {myEventsAsOrganizer.length > 0 && (
                     <div className="space-y-6">
-                      {advancePaidEvents.length > 0 && (
+                      {advanceSorted.length > 0 && (
                         <Card className="p-6 rounded-[32px] border-slate-100 bg-emerald-50/40">
-                          <h3 className="text-xs font-black text-emerald-700 uppercase tracking-[0.3em] mb-4">
-                                    25% Advance Paid - Work In Progress
-                          </h3>
-                          <div className="grid gap-3">
-                            {advancePaidEvents.map((e: any) => (
+                          <PaymentWorkflowSectionHeader
+                            title="25% advance paid – work in progress"
+                            showViewAll={showAdvanceViewAll}
+                            href={orgAllHref}
+                          />
+                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {advanceToShow.map((e: any) => (
                               (() => {
                                 const finalReq = findFinalRequestForEvent(e.id)
                                 const canRequestFinal =
@@ -787,7 +612,7 @@ export default function PaymentsPage() {
                                               description: "Go to Organizer Fees and request the remaining 75% payment from the client.",
                                               action: {
                                                 label: "Open Organizer Fees",
-                                                onClick: () => setActiveTab("organizer"),
+                                                onClick: () => router.push("/dashboard/payments?tab=organizer", { scroll: false }),
                                               },
                                             })
                                             loadData()
@@ -826,13 +651,15 @@ export default function PaymentsPage() {
                         </Card>
                       )}
 
-                      {pendingFinalEvents.length > 0 && (
+                      {pendingFinalSorted.length > 0 && (
                         <Card className="p-6 rounded-[32px] border-slate-100 bg-amber-50/60">
-                          <h3 className="text-xs font-black text-amber-700 uppercase tracking-[0.3em] mb-4">
-                            75% Final Requested - Awaiting Client Payment
-                          </h3>
-                          <div className="space-y-3">
-                            {pendingFinalEvents.map((e: any) => {
+                          <PaymentWorkflowSectionHeader
+                            title="75% final requested – awaiting client payment"
+                            showViewAll={showPendingFinalViewAll}
+                            href={orgAllHref}
+                          />
+                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {pendingFinalToShow.map((e: any) => {
                               const finalReq = findFinalRequestForEvent(e.id)
                               const requestedAt = finalReq?.created_at
                                 ? new Date(finalReq.created_at).toLocaleString()
@@ -870,13 +697,15 @@ export default function PaymentsPage() {
                         </Card>
                       )}
 
-                      {fullyPaidEvents.length > 0 && (
+                      {fullySorted.length > 0 && (
                         <Card className="p-6 rounded-[32px] border-slate-100 bg-indigo-50/70">
-                          <h3 className="text-xs font-black text-indigo-800 uppercase tracking-[0.3em] mb-4">
-                            Fully Paid — Completed
-                          </h3>
-                          <div className="grid gap-3">
-                            {fullyPaidEvents.map((e: any) => (
+                          <PaymentWorkflowSectionHeader
+                            title="Fully paid — completed"
+                            showViewAll={showFullyViewAll}
+                            href={orgAllHref}
+                          />
+                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {fullyToShow.map((e: any) => (
                               <div
                                 key={e.id}
                                 className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-indigo-100"
@@ -911,18 +740,22 @@ export default function PaymentsPage() {
                     </div>
                   )}
 
-                  {pendingForMe.length > 0 && (
+                  {pendingForMeSorted.length > 0 && (
                     <Card className="p-6 rounded-[32px] border-slate-100">
-                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Organizer Fee Requests (Pay Now)</h3>
-                      <div className="space-y-4">
-                        {pendingForMe.map((r) => (
-                          <div key={r.id} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <PaymentWorkflowSectionHeader
+                        title="Organizer fee requests (pay now)"
+                        showViewAll={showPendingForMeViewAll}
+                        href={orgAllHref}
+                      />
+                      <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {pendingForMeToShow.map((r) => (
+                          <div key={r.id} className="flex flex-col justify-between gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 h-full min-h-[140px]">
                             <div>
                               <p className="text-[10px] font-black text-slate-400 uppercase">{r.event_name}</p>
                               <p className="font-bold text-slate-900">{r.organizer_name}</p>
                               <p className="text-sm text-slate-500">{r.description}</p>
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
                               <span className="text-xl font-black text-slate-900">{formatCurrency(r.amount)}</span>
                               <Button
                                 onClick={() => handleCreatePayment(r.event_id, r.amount, undefined, r.id)}
@@ -940,45 +773,19 @@ export default function PaymentsPage() {
                   )}
                   {myEventsAsOrganizer.length > 0 && (
                     <Card className="p-6 rounded-[32px] border-slate-100">
-                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4">Request payment from client</h3>
-                      <div className="flex flex-wrap gap-3 items-end mb-6">
-                        <select
-                          value={organizerForm.event_id}
-                          onChange={(e) => handleSelectOrganizerEvent(e.target.value)}
-                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium min-w-[180px]"
-                        >
-                          <option value="">Select event</option>
-                          {eventsEligibleForPaymentRequest.map((e: any) => (
-                            <option key={e.id} value={e.id}>{e.name}</option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          placeholder="Amount"
-                          value={organizerForm.amount}
-                          readOnly
-                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium w-28 bg-slate-50 cursor-not-allowed"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Description"
-                          value={organizerForm.description}
-                          onChange={(e) => setOrganizerForm((f) => ({ ...f, description: e.target.value }))}
-                          className="h-11 rounded-xl border border-slate-200 px-3 text-sm font-medium flex-1 min-w-[160px]"
-                        />
-                        <Button onClick={handleSubmitOrganizerRequest} disabled={organizerSubmitting || !organizerForm.event_id || !organizerForm.amount} className="h-11 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase">
-                          {organizerSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
-                        </Button>
-                      </div>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">Your requests</p>
-                      <div className="mt-2 space-y-2">
-                        {myRequestsAsOrganizer.length === 0 ? (
-                          <p className="text-sm text-slate-500">No requests yet.</p>
+                      <PaymentWorkflowSectionHeader
+                        title="Your requests"
+                        showViewAll={showMyReqViewAll}
+                        href={orgAllHref}
+                      />
+                      <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {myReqSorted.length === 0 ? (
+                          <p className="text-sm text-slate-500 col-span-full">No requests yet.</p>
                         ) : (
-                          myRequestsAsOrganizer.map((r) => (
+                          myReqToShow.map((r) => (
                             <div key={r.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
-                              <span className="font-medium text-slate-800">{r.event_name} — {formatCurrency(r.amount)}</span>
-                              <Badge className={r.status === "paid" ? "bg-emerald-100 text-emerald-700 font-semibold" : r.status === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}>
+                              <span className="font-medium text-slate-800 line-clamp-1">{r.event_name} — {formatCurrency(r.amount)}</span>
+                              <Badge className={r.status === "paid" ? "bg-emerald-100 text-emerald-700 font-semibold shrink-0" : r.status === "rejected" ? "bg-red-100 text-red-700 shrink-0" : "bg-amber-100 text-amber-700 shrink-0"}>
                                 {r.status === "paid" ? "Paid" : r.status === "rejected" ? "Rejected" : "Pending"}
                               </Badge>
                             </div>
@@ -987,7 +794,7 @@ export default function PaymentsPage() {
                       </div>
                     </Card>
                   )}
-                  {pendingForMe.length === 0 && myEventsAsOrganizer.length === 0 && (
+                  {pendingForMeSorted.length === 0 && myEventsAsOrganizer.length === 0 && (
                     <div className="text-center p-20 bg-slate-50 rounded-[40px] border-dashed border-2 border-slate-200">
                       <Briefcase className="h-12 w-12 text-slate-300 mx-auto mb-3" />
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No organizer payment requests</p>
@@ -999,30 +806,15 @@ export default function PaymentsPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-[40px] border border-slate-100 p-8 shadow-sm">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] mb-6 flex items-center gap-2">
-            <History className="h-3 w-3" /> Transaction History
-          </h3>
-          <div className="space-y-3">
-            {payments.map(p => (
-              <div key={p.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100">
-                    <CreditCard className="h-4 w-4 text-slate-900" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-tighter">{p.event_name}</p>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{p.transaction_id || 'STRIPE_PIPELINE'}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-black text-slate-900 text-sm">+{formatCurrency(p.amount)}</p>
-                  <Badge className="bg-emerald-500 text-white border-none text-[8px] h-4 min-w-12 flex justify-center uppercase font-black">{p.status}</Badge>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <TransactionHistoryDialog
+          open={transactionHistoryOpen}
+          onOpenChange={setTransactionHistoryOpen}
+          payments={payments}
+          formatCurrency={formatCurrency}
+          defaultSection={
+            activeTab === "requests" ? "vendor" : activeTab === "organizer" ? "organizer" : "funding"
+          }
+        />
 
         <StripeCheckoutModal
           isOpen={isCheckoutOpen}

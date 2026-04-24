@@ -26,11 +26,23 @@ import {
   Bell,
   X,
   MessageSquare,
+  Handshake,
 } from "lucide-react"
 import { toast } from "sonner"
+import {
+  seedVendorBookingBaseline,
+  isVendorBookingUnseen,
+  markVendorBookingSeen,
+  getPreviewVisible,
+  VENDOR_EVENT_PREVIEW_COUNT,
+} from "@/lib/vendor-booking-notifications"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 export default function VendorBookingsPage() {
   const [assignedEvents, setAssignedEvents] = useState<any[]>([])
+  const [partnershipRequests, setPartnershipRequests] = useState<any[]>([])
+  const [partnershipBusy, setPartnershipBusy] = useState<number | null>(null)
   const [paymentRequests, setPaymentRequests] = useState<any[]>([])
   const [notifications, setNotifications] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,6 +58,9 @@ export default function VendorBookingsPage() {
 
   const [vendorId, setVendorId] = useState<number | null>(null)
   const [token, setToken] = useState("")
+  const [activeListExpanded, setActiveListExpanded] = useState(false)
+  const [completedListExpanded, setCompletedListExpanded] = useState(false)
+  const [badgeTick, setBadgeTick] = useState(0)
 
   const searchParams = useSearchParams()
   const defaultTab = searchParams.get("tab") === "completed" ? "completed" : "active"
@@ -81,7 +96,15 @@ export default function VendorBookingsPage() {
 
       if (eventsRes.ok) {
         const d = await eventsRes.json()
-        setAssignedEvents(d.assigned_events || [])
+        const accepted = d.assigned_events || []
+        const partners = Array.isArray(d.partnership_requests) ? d.partnership_requests : []
+        setAssignedEvents(accepted)
+        setPartnershipRequests(partners)
+        const allIds = [
+          ...partners.map((p: { id: number }) => p.id),
+          ...accepted.map((e: { id: number }) => e.id),
+        ]
+        seedVendorBookingBaseline(vendorId, allIds)
       }
       if (notifRes.ok) {
         const d = await notifRes.json()
@@ -106,7 +129,44 @@ export default function VendorBookingsPage() {
     }
   }
 
+  const markSeen = (eventId: number) => {
+    if (!vendorId) return
+    markVendorBookingSeen(vendorId, eventId)
+    setBadgeTick((n) => n + 1)
+  }
+
   // Mark event as done — backend uses PUT /api/vendors/events/<id>/complete
+  const respondToPartnership = async (eventId: number, action: "accept" | "decline") => {
+    if (!token) return
+    setPartnershipBusy(eventId)
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/vendors/partnership/${action === "accept" ? "accept" : "decline"}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ event_id: eventId }),
+        }
+      )
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        if (vendorId) markVendorBookingSeen(vendorId, eventId)
+        toast.success(action === "accept" ? "Partnership confirmed" : "Request declined")
+        setBadgeTick((n) => n + 1)
+        fetchAll()
+      } else {
+        toast.error((d as { error?: string }).error || "Could not update request")
+      }
+    } catch {
+      toast.error("Network error")
+    } finally {
+      setPartnershipBusy(null)
+    }
+  }
+
   const handleMarkAsDone = async (eventId: number) => {
     setProcessing(eventId)
     try {
@@ -214,6 +274,11 @@ export default function VendorBookingsPage() {
   const completedEvents = assignedEvents.filter((e) => e.status === "completed")
   const unreadNotifications = notifications.filter((n) => !n.is_read)
 
+  const activeDisplay = getPreviewVisible(activeEvents, activeListExpanded)
+  const completedDisplay = getPreviewVisible(completedEvents, completedListExpanded)
+  const activeRestCount = Math.max(0, activeEvents.length - VENDOR_EVENT_PREVIEW_COUNT)
+  const completedRestCount = Math.max(0, completedEvents.length - VENDOR_EVENT_PREVIEW_COUNT)
+
   const getStatusColor = (status: string) => {
     const map: Record<string, string> = {
       completed: "bg-emerald-50 text-emerald-700",
@@ -264,6 +329,63 @@ export default function VendorBookingsPage() {
             </Button>
           </div>
         </div>
+
+        {partnershipRequests.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-amber-900">
+              <Handshake className="h-5 w-5" />
+              <h2 className="text-lg font-bold">Partnership requests (newest first)</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {partnershipRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="relative flex flex-col justify-between gap-3 rounded-2xl border border-amber-100 bg-amber-50/50 p-4 sm:min-h-[9rem]"
+                >
+                  {vendorId && isVendorBookingUnseen(vendorId, req.id) && (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow ring-2 ring-amber-50/50"
+                      aria-label="New booking"
+                    >
+                      1
+                    </span>
+                  )}
+                  <div
+                    className="pr-1 cursor-default"
+                    onClick={() => {
+                      markSeen(req.id)
+                    }}
+                  >
+                    <p className="font-bold text-slate-900 pr-2">{req.name}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {req.organizer_name ? `${req.organizer_name} · ` : ""}
+                      {new Date(req.date).toLocaleDateString()} · {req.venue}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      className="rounded-xl bg-slate-900"
+                      size="sm"
+                      disabled={partnershipBusy === req.id}
+                      onClick={() => respondToPartnership(req.id, "accept")}
+                    >
+                      {partnershipBusy === req.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Accept"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="rounded-xl"
+                      size="sm"
+                      disabled={partnershipBusy === req.id}
+                      onClick={() => respondToPartnership(req.id, "decline")}
+                    >
+                      Decline
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Notification Banners */}
         {unreadNotifications.length > 0 && (
@@ -323,15 +445,24 @@ export default function VendorBookingsPage() {
           {/* Active Events Tab */}
           <TabsContent value="active" className="mt-6">
             {activeEvents.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {activeEvents.map((event) => (
-                  <Card
-                    key={event.id}
-                    className="group border-slate-200/60 hover:border-purple-200 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden"
-                  >
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {activeDisplay.map((event) => (
+                    <Card
+                      key={event.id}
+                      className="group relative border-slate-200/60 hover:border-purple-200 hover:shadow-lg transition-all duration-300 rounded-2xl overflow-hidden"
+                    >
+                      {vendorId && isVendorBookingUnseen(vendorId, event.id) && (
+                        <span
+                          className="absolute right-2 top-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow"
+                          aria-label="New booking"
+                        >
+                          1
+                        </span>
+                      )}
                     <div className="h-1.5 bg-gradient-to-r from-purple-500 to-indigo-500" />
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
+                    <CardHeader className="pb-3 pr-8">
+                      <div className="flex items-start justify-between gap-2">
                         <CardTitle className="text-base font-bold text-slate-900 leading-snug">
                           {event.name}
                         </CardTitle>
@@ -341,7 +472,11 @@ export default function VendorBookingsPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        className="w-full space-y-1.5 text-left"
+                        onClick={() => markSeen(event.id)}
+                      >
                         <p className="text-xs text-slate-500 flex items-center gap-1.5">
                           <Clock className="h-3 w-3 text-slate-400" />
                           {new Date(event.date).toLocaleDateString("en-US", {
@@ -356,11 +491,14 @@ export default function VendorBookingsPage() {
                           <DollarSign className="h-3 w-3 text-slate-400" />
                           Budget: Rs. {event.budget?.toLocaleString()}
                         </p>
-                      </div>
+                      </button>
 
-                      <div className="flex gap-2 pt-1">
+                      <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
                         <Button
-                          onClick={() => handleMarkAsDone(event.id)}
+                          onClick={() => {
+                            markSeen(event.id)
+                            handleMarkAsDone(event.id)
+                          }}
                           disabled={processing === event.id}
                           className="flex-1 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-sm h-9"
                         >
@@ -372,7 +510,10 @@ export default function VendorBookingsPage() {
                           Mark Done
                         </Button>
                         <Button
-                          onClick={() => openChat(event)}
+                          onClick={() => {
+                            markSeen(event.id)
+                            openChat(event)
+                          }}
                           variant="outline"
                           className="flex-1 rounded-xl text-sm h-9 border-slate-200 text-slate-600"
                         >
@@ -382,7 +523,32 @@ export default function VendorBookingsPage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  ))}
+                </div>
+                {activeRestCount > 0 && !activeListExpanded && (
+                  <div className="flex justify-center pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl border-slate-200"
+                      onClick={() => setActiveListExpanded(true)}
+                    >
+                      View all (+{activeRestCount} more)
+                    </Button>
+                  </div>
+                )}
+                {activeListExpanded && activeEvents.length > VENDOR_EVENT_PREVIEW_COUNT && (
+                  <div className="flex justify-center">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="text-slate-600"
+                      onClick={() => setActiveListExpanded(false)}
+                    >
+                      Show first {VENDOR_EVENT_PREVIEW_COUNT} only
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-16 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
@@ -398,17 +564,26 @@ export default function VendorBookingsPage() {
           {/* Completed Events Tab */}
           <TabsContent value="completed" className="mt-6">
             {completedEvents.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {completedEvents.map((event) => {
-                  const paymentAmount = Math.round((event.budget || 0) * 0.8)
-                  return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {completedDisplay.map((event) => {
+                    const paymentAmount = Math.round((event.budget || 0) * 0.8)
+                    return (
                     <Card
                       key={event.id}
-                      className={`border-slate-200/60 transition-all duration-200 rounded-2xl overflow-hidden ${event.payment_request_status === "paid" ? "opacity-85 border-slate-200 border hover:shadow-sm" : "hover:shadow-md"}`}
+                      className={`relative border-slate-200/60 transition-all duration-200 rounded-2xl overflow-hidden ${event.payment_request_status === "paid" ? "opacity-85 border-slate-200 border hover:shadow-sm" : "hover:shadow-md"}`}
                     >
+                      {vendorId && isVendorBookingUnseen(vendorId, event.id) && (
+                        <span
+                          className="absolute right-2 top-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow"
+                          aria-label="New booking"
+                        >
+                          1
+                        </span>
+                      )}
                       <div className="h-1.5 bg-gradient-to-r from-emerald-400 to-teal-500" />
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
+                      <CardHeader className="pb-3 pr-8">
+                        <div className="flex items-start justify-between gap-2">
                           <CardTitle className="text-base font-bold text-slate-900 leading-snug">
                             {event.name}
                           </CardTitle>
@@ -418,7 +593,11 @@ export default function VendorBookingsPage() {
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <div className="space-y-1.5">
+                        <button
+                          type="button"
+                          className="w-full space-y-1.5 text-left"
+                          onClick={() => markSeen(event.id)}
+                        >
                           <p className="text-xs text-slate-500 flex items-center gap-1.5">
                             <Clock className="h-3 w-3 text-slate-400" />
                             {new Date(event.date).toLocaleDateString("en-US", {
@@ -439,10 +618,13 @@ export default function VendorBookingsPage() {
                               Verified by organizer — you may request payment
                             </p>
                           )}
-                        </div>
+                        </button>
 
                         <Button
-                          onClick={() => handleRequestPayment(event.id, paymentAmount)}
+                          onClick={() => {
+                            markSeen(event.id)
+                            handleRequestPayment(event.id, paymentAmount)
+                          }}
                           disabled={
                             processing === event.id ||
                             !event.verified ||
@@ -476,8 +658,33 @@ export default function VendorBookingsPage() {
                         </p>
                       </CardContent>
                     </Card>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+                {completedRestCount > 0 && !completedListExpanded && (
+                  <div className="flex justify-center pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl border-slate-200"
+                      onClick={() => setCompletedListExpanded(true)}
+                    >
+                      View all (+{completedRestCount} more)
+                    </Button>
+                  </div>
+                )}
+                {completedListExpanded && completedEvents.length > VENDOR_EVENT_PREVIEW_COUNT && (
+                  <div className="flex justify-center">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="text-slate-600"
+                      onClick={() => setCompletedListExpanded(false)}
+                    >
+                      Show first {VENDOR_EVENT_PREVIEW_COUNT} only
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-16 bg-slate-50 rounded-3xl border border-dashed border-slate-200">

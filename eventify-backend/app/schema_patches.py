@@ -40,3 +40,41 @@ def ensure_budget_plan_table(app) -> None:
             BudgetPlanItem.__table__.create(bind=db.engine, checkfirst=True)
         except Exception as ex:
             app.logger.warning("ensure_budget_plan_table: %s", ex)
+
+
+def ensure_vendor_events_partnership_columns(app) -> None:
+    """Add vendor_events partnership columns for approve-before-assign flow (SQLite / dev)."""
+    with app.app_context():
+        try:
+            inspector = inspect(db.engine)
+            tables = inspector.get_table_names()
+            if "vendor_events" not in tables:
+                return
+            cols = {c["name"] for c in inspector.get_columns("vendor_events")}
+            with db.engine.begin() as conn:
+                if "partnership_status" not in cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE vendor_events ADD COLUMN partnership_status VARCHAR(20) NOT NULL DEFAULT 'accepted'"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "UPDATE vendor_events SET partnership_status = 'accepted' "
+                            "WHERE partnership_status IS NULL OR TRIM(COALESCE(partnership_status, '')) = ''"
+                        )
+                    )
+                if "partnership_confirmed_at" not in cols:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE vendor_events ADD COLUMN partnership_confirmed_at DATETIME"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "UPDATE vendor_events SET partnership_confirmed_at = assigned_at "
+                            "WHERE partnership_status = 'accepted' AND partnership_confirmed_at IS NULL"
+                        )
+                    )
+        except Exception as ex:
+            app.logger.warning("ensure_vendor_events_partnership_columns: %s", ex)

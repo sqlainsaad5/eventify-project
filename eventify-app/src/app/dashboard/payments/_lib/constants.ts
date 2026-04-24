@@ -1,0 +1,1 @@
+export const DASHBOARD_PAYMENT_PREVIEW_LIMIT = 3

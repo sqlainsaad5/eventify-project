@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { toast } from "sonner"
 import type { UserDashboardEvent, EventReviewStatus, EventApplicationRow, OrganizerRequest } from "./types"
+import type { OrganizerRatingSummaries } from "./organizer-display"
 import { MY_EVENTS_API_BASE } from "./types"
 
 export function useMyEventsDashboard() {
@@ -13,12 +14,16 @@ export function useMyEventsDashboard() {
     const [applications, setApplications] = useState<EventApplicationRow[]>([])
     const [loadingApplications, setLoadingApplications] = useState(false)
     const [assigningOrganizerId, setAssigningOrganizerId] = useState<number | null>(null)
+    const [applicationOrganizerSummaries, setApplicationOrganizerSummaries] = useState<OrganizerRatingSummaries>({})
     const [reviewStatusByEvent, setReviewStatusByEvent] = useState<Record<number, EventReviewStatus>>({})
     const [reviewDialog, setReviewDialog] = useState<{
         eventId: number
         organizerId: number
         organizerName: string
     } | null>(null)
+
+    const appCountByEventRef = useRef<Record<number, number>>({})
+    const hasSeededAppCountsRef = useRef(false)
 
     const fetchReviewStatuses = useCallback(async (eventList: UserDashboardEvent[]) => {
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
@@ -60,44 +65,161 @@ export function useMyEventsDashboard() {
         setReviewStatusByEvent(next)
     }, [])
 
-    const fetchEvents = useCallback(async (): Promise<UserDashboardEvent[]> => {
-        setLoading(true)
+    const loadApplicationOrganizerSummaries = useCallback(async (rows: EventApplicationRow[]) => {
+        const ids = [...new Set(rows.map((r) => r.organizer_id).filter((id): id is number => Number.isFinite(id)))]
+        if (!ids.length) {
+            setApplicationOrganizerSummaries({})
+            return
+        }
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-        if (!token) {
-            setLoading(false)
-            return []
-        }
-        let created: UserDashboardEvent[] = []
+        if (!token) return
         try {
-            const [eventsRes, requestsRes] = await Promise.all([
-                fetch(`${MY_EVENTS_API_BASE}/api/events`, { headers: { Authorization: `Bearer ${token}` } }),
-                fetch(`${MY_EVENTS_API_BASE}/api/payments/organizer-requests`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                }),
-            ])
-            if (eventsRes.ok) {
-                const data = await eventsRes.json()
-                const raw = data.created || []
-                created = [...raw].sort((a: UserDashboardEvent, b: UserDashboardEvent) => b.id - a.id)
-                setEvents(created)
-            } else {
-                toast.error("Failed to load your events")
+            const res = await fetch(`${MY_EVENTS_API_BASE}/api/users/rating-summaries`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ user_ids: ids }),
+            })
+            if (!res.ok) return
+            const data = await res.json()
+            const summaries = data.summaries || {}
+            const map: OrganizerRatingSummaries = {}
+            for (const key of Object.keys(summaries)) {
+                map[Number(key)] = summaries[key]
             }
-            if (requestsRes.ok) {
-                const reqData = await requestsRes.json()
-                setOrganizerRequests(reqData.organizer_requests || [])
-            }
-        } catch (err) {
-            console.error("Fetch error:", err)
-            toast.error("Internal service error")
-        } finally {
-            setLoading(false)
+            setApplicationOrganizerSummaries(map)
+        } catch {
+            setApplicationOrganizerSummaries({})
         }
-        return created
     }, [])
 
+    const openApplicationsModal = useCallback(async (eventId: number) => {
+        setApplicationsModalEventId(eventId)
+        setApplications([])
+        setApplicationOrganizerSummaries({})
+        setLoadingApplications(true)
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+        try {
+            const res = await fetch(`${MY_EVENTS_API_BASE}/api/events/${eventId}/applications`, {
+                headers: { Authorization: `Bearer ${token}` },
+            })
+                    if (res.ok) {
+                const data = await res.json()
+                const list = Array.isArray(data) ? data : []
+                setApplications(list)
+                void loadApplicationOrganizerSummaries(list)
+                if (token) {
+                    void fetch(`${MY_EVENTS_API_BASE}/api/payments/notifications/mark-read-by-action`, {
+                        method: "PUT",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ action: "view_applications", event_id: eventId }),
+                    })
+                        .then((r) => {
+                            if (r.ok && typeof window !== "undefined") {
+                                window.dispatchEvent(new Event("refresh-notifications"))
+                            }
+                        })
+                        .catch(() => {})
+                }
+            } else {
+                toast.error("Failed to load applications")
+            }
+        } catch {
+            toast.error("Failed to load applications")
+        } finally {
+            setLoadingApplications(false)
+        }
+    }, [loadApplicationOrganizerSummaries])
+
+    const fetchEvents = useCallback(
+        async (opts?: { silent?: boolean }): Promise<UserDashboardEvent[]> => {
+            const silent = opts?.silent
+            if (!silent) setLoading(true)
+            const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+            if (!token) {
+                if (!silent) setLoading(false)
+                return []
+            }
+            let created: UserDashboardEvent[] = []
+            try {
+                const [eventsRes, requestsRes] = await Promise.all([
+                    fetch(`${MY_EVENTS_API_BASE}/api/events`, { headers: { Authorization: `Bearer ${token}` } }),
+                    fetch(`${MY_EVENTS_API_BASE}/api/payments/organizer-requests`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    }),
+                ])
+                if (eventsRes.ok) {
+                    const data = await eventsRes.json()
+                    const raw = data.created || []
+                    created = [...raw].sort((a: UserDashboardEvent, b: UserDashboardEvent) => b.id - a.id)
+                    if (silent && hasSeededAppCountsRef.current) {
+                        let anyNew = false
+                        for (const e of created) {
+                            const next = e.application_count ?? 0
+                            const prev = appCountByEventRef.current[e.id] ?? 0
+                            if (next > prev) {
+                                anyNew = true
+                                const name = (e as UserDashboardEvent).name || "Event"
+                                toast.info(`New application for "${name}"`, {
+                                    action: {
+                                        label: "View",
+                                        onClick: () => {
+                                            void openApplicationsModal(e.id)
+                                        },
+                                    },
+                                })
+                            }
+                        }
+                        if (anyNew && typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("refresh-notifications"))
+                        }
+                    }
+                    for (const e of created) {
+                        appCountByEventRef.current[e.id] = e.application_count ?? 0
+                    }
+                    hasSeededAppCountsRef.current = true
+                    setEvents(created)
+                } else if (!silent) {
+                    toast.error("Failed to load your events")
+                }
+                if (requestsRes.ok) {
+                    const reqData = await requestsRes.json()
+                    setOrganizerRequests(reqData.organizer_requests || [])
+                }
+            } catch (err) {
+                console.error("Fetch error:", err)
+                if (!silent) toast.error("Internal service error")
+            } finally {
+                if (!silent) setLoading(false)
+            }
+            return created
+        },
+        [openApplicationsModal],
+    )
+
     useEffect(() => {
-        fetchEvents()
+        void fetchEvents()
+    }, [fetchEvents])
+
+    useEffect(() => {
+        const t = setInterval(() => {
+            void fetchEvents({ silent: true })
+        }, 45000)
+        const onVisibility = () => {
+            if (document.visibilityState === "visible") {
+                void fetchEvents({ silent: true })
+            }
+        }
+        document.addEventListener("visibilitychange", onVisibility)
+        return () => {
+            clearInterval(t)
+            document.removeEventListener("visibilitychange", onVisibility)
+        }
     }, [fetchEvents])
 
     useEffect(() => {
@@ -136,28 +258,6 @@ export function useMyEventsDashboard() {
         }
     }
 
-    const openApplicationsModal = async (eventId: number) => {
-        setApplicationsModalEventId(eventId)
-        setApplications([])
-        setLoadingApplications(true)
-        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-        try {
-            const res = await fetch(`${MY_EVENTS_API_BASE}/api/events/${eventId}/applications`, {
-                headers: { Authorization: `Bearer ${token}` },
-            })
-            if (res.ok) {
-                const data = await res.json()
-                setApplications(Array.isArray(data) ? data : [])
-            } else {
-                toast.error("Failed to load applications")
-            }
-        } catch {
-            toast.error("Failed to load applications")
-        } finally {
-            setLoadingApplications(false)
-        }
-    }
-
     const handleAssignOrganizer = async (eventId: number, organizerId: number) => {
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
         if (!token) return
@@ -174,7 +274,7 @@ export function useMyEventsDashboard() {
             if (res.ok) {
                 toast.success("Organizer assigned successfully")
                 setApplicationsModalEventId(null)
-                await fetchEvents()
+                await fetchEvents({ silent: true })
             } else {
                 const data = await res.json()
                 toast.error(data.error || "Failed to assign organizer")
@@ -186,7 +286,7 @@ export function useMyEventsDashboard() {
         }
     }
 
-    const submitReview = async (rating: number, comment: string) => {
+    const submitReview = async (rating: number, comment: string | undefined) => {
         if (!reviewDialog) return
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
         if (!token) {
@@ -203,7 +303,7 @@ export function useMyEventsDashboard() {
                 review_type: "user_to_organizer",
                 subject_id: reviewDialog.organizerId,
                 rating,
-                comment: comment.trim() || undefined,
+                comment: (comment && comment.trim()) || undefined,
             }),
         })
         const data = await res.json().catch(() => ({}))
@@ -212,7 +312,7 @@ export function useMyEventsDashboard() {
             throw new Error(data.error || "submit failed")
         }
         toast.success("Thanks for your feedback")
-        const updated = await fetchEvents()
+        const updated = await fetchEvents({ silent: true })
         await fetchReviewStatuses(updated.length ? updated : events)
     }
 
@@ -225,6 +325,7 @@ export function useMyEventsDashboard() {
         applications,
         loadingApplications,
         assigningOrganizerId,
+        applicationOrganizerSummaries,
         reviewStatusByEvent,
         reviewDialog,
         setReviewDialog,

@@ -69,6 +69,7 @@ export function MyEventsSubList({ variant, title, emptyMessage }: { variant: Fil
                 applications={dash.applications}
                 loadingApplications={dash.loadingApplications}
                 assigningOrganizerId={dash.assigningOrganizerId}
+                applicationOrganizerSummaries={dash.applicationOrganizerSummaries}
                 onAssign={dash.handleAssignOrganizer}
                 reviewDialog={dash.reviewDialog}
                 setReviewDialog={dash.setReviewDialog}
