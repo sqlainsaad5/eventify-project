@@ -1,12 +1,12 @@
 "use client"
 
 import { MarketingLayout } from "@/components/marketing/marketing-layout"
-import { HeroSection } from "@/components/marketing/sections/hero-section"
+import { PricingSection } from "@/components/marketing/sections/pricing-section"
 
-export default function HomePage() {
+export default function PricingPage() {
   return (
     <MarketingLayout>
-      <HeroSection />
+      <PricingSection />
     </MarketingLayout>
   )
 }

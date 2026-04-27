@@ -1,12 +1,12 @@
 "use client"
 
 import { MarketingLayout } from "@/components/marketing/marketing-layout"
-import { HeroSection } from "@/components/marketing/sections/hero-section"
+import { CtaSection } from "@/components/marketing/sections/cta-section"
 
-export default function HomePage() {
+export default function ReadyToDeployPage() {
   return (
     <MarketingLayout>
-      <HeroSection />
+      <CtaSection />
     </MarketingLayout>
   )
 }
