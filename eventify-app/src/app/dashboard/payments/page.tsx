@@ -22,6 +22,7 @@ import { EventFundingGrid } from "./_components/event-funding-grid"
 import { VendorPayoutCard } from "./_components/vendor-payout-card"
 import { TransactionHistoryDialog } from "./_components/transaction-history-dialog"
 import type { AppNotification } from "./_lib/payment-workflow-types"
+import { isOrganizerFinal75FeeRequest } from "@/lib/organizer-fee-request-phase"
 
 export default function PaymentsPage() {
   const router = useRouter()
@@ -193,12 +194,6 @@ export default function PaymentsPage() {
   const handleApprove = async (rid: number) => {
     const token = getToken()
     await fetch(`${API_BASE}/api/payments/requests/${rid}/approve`, { method: "PUT", headers: { "Authorization": `Bearer ${token}` } })
-    loadData()
-  }
-
-  const handleReject = async (rid: number) => {
-    const token = getToken()
-    await fetch(`${API_BASE}/api/payments/requests/${rid}/reject`, { method: "PUT", headers: { "Authorization": `Bearer ${token}` } })
     loadData()
   }
 
@@ -443,7 +438,6 @@ export default function PaymentsPage() {
                     formatCurrency={formatCurrency}
                     getStatusBadge={getStatusBadge}
                     onApprove={handleApprove}
-                    onReject={handleReject}
                     onAuthorize={(eventId, amount, requestId) => handleCreatePayment(eventId, amount, requestId)}
                     processing={processing}
                   />
@@ -764,7 +758,16 @@ export default function PaymentsPage() {
                               >
                                 {processing === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Pay"}
                               </Button>
-                              <Button variant="outline" size="sm" className="h-10 rounded-xl text-red-600" onClick={() => handleRejectOrganizerRequest(r.id)}>Reject</Button>
+                              {!isOrganizerFinal75FeeRequest(r.description) && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-10 rounded-xl text-red-600"
+                                  onClick={() => handleRejectOrganizerRequest(r.id)}
+                                >
+                                  Reject
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ))}

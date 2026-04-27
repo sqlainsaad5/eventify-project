@@ -453,7 +453,7 @@ export default function VendorProfilePage() {
                       <p className="text-sm text-muted-foreground">{event.date} • {event.venue}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-medium">${event.budget}</p>
+                      <p className="font-medium">Rs {event.budget}</p>
                       <p className="text-sm text-muted-foreground">{event.vendor_category}</p>
                     </div>
                   </div>

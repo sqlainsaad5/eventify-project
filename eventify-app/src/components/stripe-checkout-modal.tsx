@@ -62,7 +62,7 @@ const CheckoutForm = ({ amount, onSuccess }: CheckoutFormProps) => {
                     <CreditCard className="h-4 w-4" />
                 </div>
                 <div className="text-2xl font-black text-slate-900">
-                    Rs. {amount.toLocaleString()}
+                    Rs {amount.toLocaleString()}
                 </div>
             </div>
 

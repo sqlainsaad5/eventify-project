@@ -64,7 +64,7 @@ export function UserCanceledEventCard({ event, onDelete }: { event: UserDashboar
                         <Calendar className="h-4 w-4" />
                         {new Date(event.date).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
                     </div>
-                    <div className="text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">${(event.budget / 1000).toFixed(1)}k</div>
+                    <div className="text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Rs {(event.budget / 1000).toFixed(1)}k</div>
                 </div>
             </CardContent>
         </Card>
@@ -157,7 +157,7 @@ export function UserActiveCompletedEventCard({
                                 <Target className="h-5 w-5" />
                             </div>
                             <div>
-                                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 leading-none mb-1">Expert Active</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 leading-none mb-1">Organizer</p>
                                 <p className="text-sm font-black text-emerald-900 leading-none">{event.organizer_name}</p>
                             </div>
                         </div>
@@ -175,7 +175,9 @@ export function UserActiveCompletedEventCard({
                     )}
                     {event.organizer_status === "rejected" && (
                         <div
-                            onClick={() => router.push("/my-events/event-details")}
+                            onClick={() =>
+                                router.push(`/my-events/event-details?eventId=${event.id}`)
+                            }
                             className="flex items-center gap-3 bg-red-50 p-4 rounded-3xl border border-red-100 mb-4 cursor-pointer group/status hover:bg-red-100/50 transition-all"
                         >
                             <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-100">
@@ -257,7 +259,7 @@ export function UserActiveCompletedEventCard({
                             <Calendar className="h-4 w-4" />
                             {new Date(event.date).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
                         </div>
-                        <div className="text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">${(event.budget / 1000).toFixed(1)}k</div>
+                        <div className="text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Rs {(event.budget / 1000).toFixed(1)}k</div>
                     </div>
 
                     <div className="space-y-3">
@@ -289,7 +291,7 @@ export function UserActiveCompletedEventCard({
                             className="w-full bg-slate-900 hover:bg-black text-white rounded-2xl h-12 font-black uppercase tracking-widest text-[11px] gap-2 shadow-xl shadow-slate-200"
                         >
                             <MessageSquare className="h-4 w-4" />
-                            Message Expert
+                            Message Organizer
                         </Button>
                     )}
 

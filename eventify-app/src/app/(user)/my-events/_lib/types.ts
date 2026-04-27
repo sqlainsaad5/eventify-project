@@ -41,6 +41,7 @@ export interface EventApplicationRow {
     organizer_name: string | null
     organizer_email: string | null
     message: string | null
+    /** pending | accepted | rejected (another organizer assigned) | declined (host declined; organizer may re-apply) */
     status: string
     created_at: string | null
     organizer_profile?: OrganizerProfileRow | null

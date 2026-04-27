@@ -1,14 +1,23 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Loader2, DollarSign, Briefcase, History, CreditCard } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Loader2, Briefcase, History, CreditCard, ChevronLeft, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 import { StripeCheckoutModal } from "@/components/stripe-checkout-modal"
 import { ReviewDialog } from "@/components/review-dialog"
+import { isOrganizerFinal75FeeRequest, organizerRequestPhase } from "@/lib/organizer-fee-request-phase"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
@@ -52,15 +61,83 @@ const organizerAdvanceLabel = (status: OrganizerPaymentRequest["status"]) => {
   }
 }
 
-const requestPhaseLabel = (request: OrganizerPaymentRequest) => {
-  const description = (request.description || "").toLowerCase()
-  if (description.includes("75%") || description.includes("final")) {
-    return "Final 75%"
-  }
-  if (description.includes("25%") || description.includes("advance")) {
-    return "Advance 25%"
-  }
-  return "Organizer Fee"
+const requestPhaseLabel = (request: OrganizerPaymentRequest) =>
+  organizerRequestPhase(request.description)
+
+const ORGANIZER_HISTORY_PAGE_SIZE = 5
+
+const isOrganizerPaymentRecord = (p: PaymentRecord) =>
+  p.payment_type === "organizer" ||
+  p.payment_type === "organizer_advance" ||
+  p.payment_type === "organizer_final"
+
+const organizerPaymentTypeLine = (p: PaymentRecord) => {
+  if (p.payment_type === "organizer_final") return "Organizer final 75% paid"
+  if (p.payment_type === "organizer_advance") return "Organizer advance 25% paid"
+  if (p.payment_type === "organizer") return "Payment to organizer"
+  return null
+}
+
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+function paymentCreatedOnLocalYmd(createdAt: string | null): string | null {
+  if (!createdAt) return null
+  return toLocalYmd(new Date(createdAt))
+}
+
+function paymentInDateRange(
+  createdAt: string | null,
+  from: string,
+  to: string
+): boolean {
+  const ymd = paymentCreatedOnLocalYmd(createdAt)
+  if (!ymd) return false
+  if (from && ymd < from) return false
+  if (to && ymd > to) return false
+  return true
+}
+
+function OrganizerHistoryRow({ p }: { p: PaymentRecord }) {
+  const typeLine = organizerPaymentTypeLine(p)
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="p-2 rounded-xl bg-white border border-slate-100 shrink-0">
+          <CreditCard className="h-4 w-4 text-slate-600" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-black text-slate-900 uppercase tracking-tighter truncate">
+            {p.event_name}
+          </p>
+          {typeLine && (
+            <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
+              {typeLine}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="font-black text-slate-900">{formatCurrency(p.amount)}</p>
+        <p className="text-[10px] text-slate-400">
+          {p.created_at
+            ? new Date(p.created_at).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+            : ""}
+        </p>
+        <span className="inline-block mt-1 text-[9px] font-black uppercase bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+          {p.status}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 export default function MyEventsPaymentsPage() {
@@ -79,8 +156,55 @@ export default function MyEventsPaymentsPage() {
     organizerName: string
     eventName: string
   } | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyDateFrom, setHistoryDateFrom] = useState("")
+  const [historyDateTo, setHistoryDateTo] = useState("")
+  const [historyPage, setHistoryPage] = useState(1)
 
   const getToken = () => localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+
+  const organizerOnlyPayments = useMemo(() => {
+    return payments
+      .filter(isOrganizerPaymentRecord)
+      .sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0
+        return tb - ta
+      })
+  }, [payments])
+
+  const dateFilteredHistory = useMemo(() => {
+    if (!historyDateFrom && !historyDateTo) return organizerOnlyPayments
+    return organizerOnlyPayments.filter((p) =>
+      paymentInDateRange(p.created_at, historyDateFrom, historyDateTo)
+    )
+  }, [organizerOnlyPayments, historyDateFrom, historyDateTo])
+
+  const { historyPageCount, historyCurrentPage, historyPageItems } = useMemo(() => {
+    const n = dateFilteredHistory.length
+    if (n === 0) {
+      return { historyPageCount: 0, historyCurrentPage: 1, historyPageItems: [] as PaymentRecord[] }
+    }
+    const pageCount = Math.ceil(n / ORGANIZER_HISTORY_PAGE_SIZE)
+    const currentPage = Math.min(Math.max(1, historyPage), pageCount)
+    const start = (currentPage - 1) * ORGANIZER_HISTORY_PAGE_SIZE
+    return {
+      historyPageCount: pageCount,
+      historyCurrentPage: currentPage,
+      historyPageItems: dateFilteredHistory.slice(start, start + ORGANIZER_HISTORY_PAGE_SIZE),
+    }
+  }, [dateFilteredHistory, historyPage])
+
+  const mostRecentOrganizerPayment = organizerOnlyPayments[0] ?? null
+
+  useEffect(() => {
+    setHistoryPage((p) => {
+      const n = dateFilteredHistory.length
+      if (n === 0) return 1
+      const pageCount = Math.ceil(n / ORGANIZER_HISTORY_PAGE_SIZE)
+      return Math.min(p, pageCount)
+    })
+  }, [dateFilteredHistory])
 
   const loadData = async () => {
     const token = getToken()
@@ -269,7 +393,7 @@ export default function MyEventsPaymentsPage() {
         ) : pendingRequests.length > 0 ? (
           <Card className="p-6 rounded-[32px] border-slate-100">
             <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
+              <span className="text-xs font-bold w-4 h-4 flex items-center justify-center">Rs</span>
               Organizer Fee Requests (Pay Now)
             </h3>
             <div className="space-y-4">
@@ -310,14 +434,16 @@ export default function MyEventsPaymentsPage() {
                         "Pay Now"
                       )}
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-10 rounded-xl text-red-600"
-                      onClick={() => handleRejectOrganizerRequest(r.id)}
-                    >
-                      Reject
-                    </Button>
+                    {!isOrganizerFinal75FeeRequest(r.description) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-10 rounded-xl text-red-600"
+                        onClick={() => handleRejectOrganizerRequest(r.id)}
+                      >
+                        Reject
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -344,58 +470,153 @@ export default function MyEventsPaymentsPage() {
         )}
 
         <Card className="p-6 rounded-[32px] border-slate-100 mt-8">
-          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <History className="h-4 w-4" />
-            Organizer Payment History
-          </h3>
-          <div className="space-y-3">
-            {payments.length === 0 ? (
-              <p className="text-sm text-slate-500">No payments yet.</p>
-            ) : (
-              payments.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex flex-wrap items-center justify-between gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-white border border-slate-100">
-                      <CreditCard className="h-4 w-4 text-slate-600" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-slate-900 uppercase tracking-tighter">
-                        {p.event_name}
-                      </p>
-                      {(p.payment_type === "organizer" || p.payment_type === "organizer_advance" || p.payment_type === "organizer_final") && (
-                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
-                          {p.payment_type === "organizer_final"
-                            ? "Organizer final 75% paid"
-                            : p.payment_type === "organizer_advance"
-                              ? "Organizer advance 25% paid"
-                              : "Payment to organizer"}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-black text-slate-900">{formatCurrency(p.amount)}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {p.created_at
-                        ? new Date(p.created_at).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })
-                        : ""}
-                    </p>
-                    <span className="inline-block mt-1 text-[9px] font-black uppercase bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                      {p.status}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider mb-1 flex items-center gap-2">
+                <History className="h-4 w-4" />
+                Organizer Payment History
+              </h3>
+              <p className="text-sm text-slate-600">
+                <span className="font-bold text-slate-900">
+                  {organizerOnlyPayments.length}
+                </span>{" "}
+                organizer fee{" "}
+                {organizerOnlyPayments.length === 1 ? "payment" : "payments"} recorded
+                {mostRecentOrganizerPayment?.created_at ? (
+                  <>
+                    <span className="text-slate-400"> · </span>
+                    Most recent:{" "}
+                    {new Date(mostRecentOrganizerPayment.created_at).toLocaleDateString(
+                      undefined,
+                      { month: "short", day: "numeric", year: "numeric" }
+                    )}
+                  </>
+                ) : null}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="default"
+              className="h-10 rounded-xl bg-slate-900 text-white font-black text-[10px] uppercase shrink-0"
+              onClick={() => setHistoryOpen(true)}
+            >
+              View History
+            </Button>
           </div>
         </Card>
+
+        <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+          <DialogContent className="max-w-lg max-h-[90vh] flex flex-col rounded-[28px] p-0 gap-0 sm:max-w-lg">
+            <DialogHeader className="px-6 pt-6 pb-3 border-b border-slate-100">
+              <DialogTitle className="text-lg font-black text-slate-900">
+                Organizer payment history
+              </DialogTitle>
+            </DialogHeader>
+            <div className="px-6 py-3 border-b border-slate-100 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    From
+                  </Label>
+                  <Input
+                    type="date"
+                    value={historyDateFrom}
+                    onChange={(e) => {
+                      setHistoryDateFrom(e.target.value)
+                      setHistoryPage(1)
+                    }}
+                    className="rounded-xl border-slate-200 h-9 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    To
+                  </Label>
+                  <Input
+                    type="date"
+                    value={historyDateTo}
+                    onChange={(e) => {
+                      setHistoryDateTo(e.target.value)
+                      setHistoryPage(1)
+                    }}
+                    className="rounded-xl border-slate-200 h-9 text-sm"
+                  />
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg text-xs font-bold"
+                onClick={() => {
+                  setHistoryDateFrom("")
+                  setHistoryDateTo("")
+                  setHistoryPage(1)
+                }}
+              >
+                Clear dates
+              </Button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-3">
+              {dateFilteredHistory.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-8">
+                  {organizerOnlyPayments.length === 0
+                    ? "No organizer fee payments yet."
+                    : "No payments match the selected date range."}
+                </p>
+              ) : (
+                historyPageItems.map((p) => (
+                  <OrganizerHistoryRow key={p.id} p={p} />
+                ))
+              )}
+            </div>
+            {dateFilteredHistory.length > 0 && (
+              <div className="px-6 py-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <p className="text-xs text-slate-500 text-center sm:text-left">
+                  Showing{" "}
+                  {Math.min(
+                    (historyCurrentPage - 1) * ORGANIZER_HISTORY_PAGE_SIZE + 1,
+                    dateFilteredHistory.length
+                  )}
+                  –{Math.min(
+                    historyCurrentPage * ORGANIZER_HISTORY_PAGE_SIZE,
+                    dateFilteredHistory.length
+                  )}{" "}
+                  of {dateFilteredHistory.length} · Page {historyCurrentPage} of{" "}
+                  {historyPageCount}
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    disabled={historyCurrentPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    disabled={historyCurrentPage >= historyPageCount}
+                    onClick={() =>
+                      setHistoryPage((p) =>
+                        Math.min(p + 1, historyPageCount)
+                      )
+                    }
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <StripeCheckoutModal
           isOpen={isCheckoutOpen}

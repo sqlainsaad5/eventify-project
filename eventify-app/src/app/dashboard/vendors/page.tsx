@@ -30,8 +30,12 @@ import {
   ExternalLink,
   UserPlus,
   CheckCircle,
-  ShieldCheck
+  ShieldCheck,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -41,11 +45,24 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
+import { formatChatMessageTime } from "@/lib/format-chat-time";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+/** Vendors shown per page in the browse (grid + list) section */
+const VENDORS_PAGE_SIZE = 9;
+
+interface VendorAssignedEventRow {
+  id: number;
+  name: string;
+  partnership_status?: string;
+  assigned_at?: string | null;
+  completed?: boolean;
+  verified?: boolean;
+}
 
 interface Vendor {
   id: number;
@@ -57,7 +74,7 @@ interface Vendor {
   profile_image?: string;
   rating?: number | null;
   rating_count?: number;
-  assigned_events: any[];
+  assigned_events: VendorAssignedEventRow[];
   assigned_events_count: number;
   /** Partnership requests not yet accepted by the vendor */
   pending_partnership_count?: number;
@@ -164,6 +181,8 @@ function VendorsPageContent() {
   const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [vendorListPage, setVendorListPage] = useState(1);
+  const [marketplaceTab, setMarketplaceTab] = useState<"browse" | "requested">("browse");
   const [events, setEvents] = useState<{ id: number; name: string }[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<string>("");
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
@@ -504,14 +523,77 @@ function VendorsPageContent() {
       });
     }
     if (debouncedSearch.trim()) {
-      filteredData = filteredData.filter((v) =>
-        v.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        v.city.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        v.category.toLowerCase().includes(debouncedSearch.toLowerCase())
-      );
+      const q = debouncedSearch.toLowerCase();
+      filteredData = filteredData.filter((v) => {
+        const name = (v.name ?? "").toLowerCase();
+        const city = (v.city ?? "").toLowerCase();
+        const cat = (v.category ?? "").toLowerCase();
+        return name.includes(q) || city.includes(q) || cat.includes(q);
+      });
     }
     setFiltered(filteredData);
   }, [debouncedSearch, category, vendors]);
+
+  const vendorPageCount = Math.max(1, Math.ceil(filtered.length / VENDORS_PAGE_SIZE));
+  const vendorListPageClamped = Math.min(Math.max(1, vendorListPage), vendorPageCount);
+
+  const pagedVendors = useMemo(() => {
+    const start = (vendorListPageClamped - 1) * VENDORS_PAGE_SIZE;
+    return filtered.slice(start, start + VENDORS_PAGE_SIZE);
+  }, [filtered, vendorListPageClamped]);
+
+  useEffect(() => {
+    setVendorListPage(1);
+  }, [debouncedSearch, category]);
+
+  useEffect(() => {
+    setVendorListPage((p) => {
+      const pc = Math.max(1, Math.ceil(filtered.length / VENDORS_PAGE_SIZE));
+      return Math.min(p, pc);
+    });
+  }, [filtered.length]);
+
+  const pendingPartnershipRows = useMemo(() => {
+    const rows: { vendor: Vendor; event: VendorAssignedEventRow }[] = [];
+    for (const v of vendors) {
+      const list = Array.isArray(v.assigned_events) ? v.assigned_events : [];
+      for (const ev of list) {
+        if (ev.partnership_status === "pending") {
+          rows.push({ vendor: v, event: ev });
+        }
+      }
+    }
+    rows.sort((a, b) => {
+      const ta = a.event.assigned_at ? new Date(a.event.assigned_at).getTime() : 0;
+      const tb = b.event.assigned_at ? new Date(b.event.assigned_at).getTime() : 0;
+      return tb - ta;
+    });
+    return rows;
+  }, [vendors]);
+
+  const requestedFiltered = useMemo(() => {
+    let base = pendingPartnershipRows;
+    if (category !== "all") {
+      const selectedCategory = category.trim().toLowerCase();
+      base = base.filter(({ vendor }) => {
+        const vendorCategory = (vendor.category || "").trim().toLowerCase();
+        return (
+          vendorCategory === selectedCategory ||
+          vendorCategory.includes(selectedCategory) ||
+          selectedCategory.includes(vendorCategory)
+        );
+      });
+    }
+    if (!debouncedSearch.trim()) return base;
+    const q = debouncedSearch.toLowerCase();
+    return base.filter(({ vendor, event: ev }) => {
+      const name = (vendor.name ?? "").toLowerCase();
+      const city = (vendor.city ?? "").toLowerCase();
+      const cat = (vendor.category ?? "").toLowerCase();
+      const en = (ev.name ?? "").toLowerCase();
+      return name.includes(q) || city.includes(q) || cat.includes(q) || en.includes(q);
+    });
+  }, [pendingPartnershipRows, debouncedSearch, category]);
 
   const handleAssignVendor = async (vendorId: number) => {
     if (!selectedEvent) {
@@ -532,6 +614,7 @@ function VendorsPageContent() {
         toast({ title: "Partnership request sent", description: data.message || "The vendor can accept it from their dashboard." });
         setAssignModalOpen(false);
         setSelectedEvent("");
+        setMarketplaceTab("requested");
         loadVendors();
       } else {
         toast({ title: "Request could not be sent", description: data.error || "Try again in a moment.", variant: "destructive" });
@@ -579,6 +662,47 @@ function VendorsPageContent() {
           </div>
         </div>
 
+        {/* Browse vs pending requests */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMarketplaceTab("browse")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-bold transition-all border",
+              marketplaceTab === "browse"
+                ? "border-purple-600 bg-purple-600 text-white shadow-md shadow-purple-200/60"
+                : "border-slate-100 bg-white text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            Browse all
+          </button>
+          <button
+            type="button"
+            onClick={() => setMarketplaceTab("requested")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-bold transition-all border",
+              marketplaceTab === "requested"
+                ? "border-purple-600 bg-purple-600 text-white shadow-md shadow-purple-200/60"
+                : "border-slate-100 bg-white text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            <Clock className="h-4 w-4 shrink-0" />
+            Requested
+            {pendingPartnershipRows.length > 0 ? (
+              <span
+                className={cn(
+                  "min-w-[1.25rem] rounded-full px-1.5 text-center text-[10px] font-black tabular-nums",
+                  marketplaceTab === "requested"
+                    ? "bg-white/25 text-white"
+                    : "bg-amber-100 text-amber-900"
+                )}
+              >
+                {pendingPartnershipRows.length}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
         {/* Toolbar Section */}
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-white p-4 rounded-[32px] border border-slate-100 shadow-sm">
           <div className="flex flex-1 flex-col sm:flex-row gap-4 w-full">
@@ -605,24 +729,26 @@ function VendorsPageContent() {
             </Select>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
-            <Button
-              variant={viewMode === "grid" ? "outline" : "ghost"}
-              size="icon"
-              onClick={() => setViewMode("grid")}
-              className={`h-9 w-9 rounded-xl ${viewMode === "grid" ? "bg-white shadow-sm border-slate-100" : "border-transparent text-slate-400"}`}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === "list" ? "outline" : "ghost"}
-              size="icon"
-              onClick={() => setViewMode("list")}
-              className={`h-9 w-9 rounded-xl ${viewMode === "list" ? "bg-white shadow-sm border-slate-100" : "border-transparent text-slate-400"}`}
-            >
-              <List className="h-4 w-4" />
-            </Button>
-          </div>
+          {marketplaceTab === "browse" ? (
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+              <Button
+                variant={viewMode === "grid" ? "outline" : "ghost"}
+                size="icon"
+                onClick={() => setViewMode("grid")}
+                className={`h-9 w-9 rounded-xl ${viewMode === "grid" ? "bg-white shadow-sm border-slate-100" : "border-transparent text-slate-400"}`}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === "list" ? "outline" : "ghost"}
+                size="icon"
+                onClick={() => setViewMode("list")}
+                className={`h-9 w-9 rounded-xl ${viewMode === "list" ? "bg-white shadow-sm border-slate-100" : "border-transparent text-slate-400"}`}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         {/* Content Section */}
@@ -631,10 +757,135 @@ function VendorsPageContent() {
             <Loader2 className="h-10 w-10 text-purple-600 animate-spin" />
             <p className="text-slate-500 font-bold animate-pulse uppercase tracking-widest text-[10px]">Calling elite vendors...</p>
           </div>
+        ) : marketplaceTab === "requested" ? (
+          pendingPartnershipRows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-32 bg-white rounded-[40px] border border-dashed border-slate-200 px-6">
+              <div className="h-20 w-20 bg-amber-50 rounded-full flex items-center justify-center mb-6">
+                <Clock className="h-10 w-10 text-amber-400" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 uppercase tracking-tight">No requests yet</h3>
+              <p className="text-slate-500 mt-2 max-w-md text-center font-medium">
+                When you send a partnership request from <span className="text-slate-800 font-bold">Browse all</span>, it will
+                show up here so you can track who is still to respond.
+              </p>
+            </div>
+          ) : requestedFiltered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-32 bg-white rounded-[40px] border border-dashed border-slate-200">
+              <Search className="h-10 w-10 text-slate-300 mb-4" />
+              <h3 className="text-lg font-bold text-slate-900">No matching requests</h3>
+              <p className="text-slate-500 mt-1 text-sm">Try a different search or category.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {requestedFiltered.map(({ vendor, event: ev }) => {
+                const sent = ev.assigned_at
+                  ? new Date(ev.assigned_at).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })
+                  : null;
+                return (
+                  <Card
+                    key={`${vendor.id}-${ev.id}`}
+                    className="border-slate-200/60 shadow-sm rounded-[28px] bg-white overflow-hidden"
+                  >
+                    <CardContent className="p-5 sm:p-6">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex min-w-0 flex-1 gap-4">
+                          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-slate-100 bg-slate-100">
+                            <img
+                              src={
+                                vendor.profile_image ||
+                                "https://images.unsplash.com/photo-1556740758-90de374c12ad?w=200&q=80"
+                              }
+                              className="h-full w-full object-cover"
+                              alt=""
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="truncate text-lg font-bold uppercase tracking-tight text-slate-900">
+                                {vendor.name}
+                              </h3>
+                              <Badge className="border-0 bg-slate-100 text-[10px] font-bold uppercase tracking-widest text-slate-600">
+                                {vendor.category}
+                              </Badge>
+                              <Badge
+                                variant="secondary"
+                                className="border-amber-200 bg-amber-50 text-[10px] font-black uppercase tracking-tight text-amber-900"
+                              >
+                                Awaiting vendor
+                              </Badge>
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600">
+                              <span className="inline-flex min-w-0 items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 shrink-0 text-purple-500" />
+                                <span className="font-semibold text-slate-800 truncate">{ev.name}</span>
+                              </span>
+                            </div>
+                            {sent ? (
+                              <p className="mt-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                                Sent {sent}
+                              </p>
+                            ) : null}
+                            <div className="mt-2 flex flex-wrap gap-3 text-xs font-medium text-slate-500">
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="h-3 w-3" /> {vendor.city}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                          <Button
+                            variant="outline"
+                            className="rounded-xl border-slate-200"
+                            onClick={() => {
+                              setCurrentVendorForServices(vendor);
+                              setServicesDialogOpen(true);
+                              fetchVendorServices(vendor.id);
+                            }}
+                          >
+                            <Briefcase className="h-4 w-4" />
+                            Services
+                          </Button>
+                          <Button
+                            className="rounded-xl bg-purple-600 hover:bg-purple-700"
+                            onClick={async () => {
+                              await fetchChatMessages(vendor.id);
+                              const conv = conversations.find((c) => c.vendor_id === vendor.id);
+                              setSelectedConversation(
+                                conv
+                                  ? { ...conv, event_id: ev.id, assigned_events: vendor.assigned_events }
+                                  : {
+                                      vendor_id: vendor.id,
+                                      vendor_name: vendor.name,
+                                      vendor_email: vendor.email,
+                                      last_message: "",
+                                      last_message_time: "",
+                                      unread_count: 0,
+                                      event_id: ev.id,
+                                      assigned_events: vendor.assigned_events,
+                                    }
+                              );
+                              setChatDialogOpen(true);
+                            }}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            Message
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )
         ) : filtered.length > 0 ? (
-          viewMode === "grid" ? (
+          <>
+          {viewMode === "grid" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {filtered.map((vendor) => (
+              {pagedVendors.map((vendor) => (
                 <Card key={vendor.id} className="group overflow-hidden border-slate-200/60 shadow-sm hover:shadow-2xl hover:shadow-purple-100 hover:border-purple-200 transition-all duration-500 rounded-[32px] bg-white">
                   <div className="relative h-44 bg-slate-100 overflow-hidden">
                     <img
@@ -806,7 +1057,7 @@ function VendorsPageContent() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filtered.map((vendor) => (
+                  {pagedVendors.map((vendor) => (
                     <tr key={vendor.id} className="hover:bg-slate-50/80 transition-colors group">
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
@@ -920,7 +1171,51 @@ function VendorsPageContent() {
                 </tbody>
               </table>
             </div>
-          )
+          )}
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/80 p-4 rounded-[24px] border border-slate-100">
+            <p className="text-sm text-slate-500 font-medium tabular-nums order-2 sm:order-1">
+              Showing{" "}
+              <span className="font-bold text-slate-800">
+                {filtered.length === 0
+                  ? 0
+                  : (vendorListPageClamped - 1) * VENDORS_PAGE_SIZE + 1}
+                –{Math.min(vendorListPageClamped * VENDORS_PAGE_SIZE, filtered.length)}
+              </span>{" "}
+              of <span className="font-bold text-slate-800">{filtered.length}</span>
+            </p>
+            {vendorPageCount > 1 && (
+              <div className="flex items-center gap-2 order-1 sm:order-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-xl border-slate-200"
+                  onClick={() => setVendorListPage((p) => Math.max(1, p - 1))}
+                  disabled={vendorListPageClamped <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Previous
+                </Button>
+                <span className="text-sm font-bold text-slate-700 min-w-[7rem] text-center tabular-nums px-1">
+                  Page {vendorListPageClamped} of {vendorPageCount}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-xl border-slate-200"
+                  onClick={() =>
+                    setVendorListPage((p) => Math.min(vendorPageCount, p + 1))
+                  }
+                  disabled={vendorListPageClamped >= vendorPageCount}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
+          </div>
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center py-40 bg-white rounded-[40px] border border-dashed border-slate-200">
             <div className="h-20 w-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
@@ -1130,7 +1425,7 @@ function VendorsPageContent() {
                     <p className="text-sm font-medium leading-relaxed">{msg.message}</p>
                     <div className="flex items-center justify-between mt-2 gap-4">
                       <span className={`text-[9px] font-black uppercase tracking-widest ${msg.sender_id === organizerId ? "text-purple-200" : "text-slate-400"}`}>
-                        {msg.timestamp}
+                        {formatChatMessageTime(msg.created_at)}
                       </span>
                     </div>
                   </div>

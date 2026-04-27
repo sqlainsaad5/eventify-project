@@ -459,8 +459,20 @@ def get_organizer_earnings():
 @jwt_required()
 def get_events_with_payment_status():
     user_id = get_jwt_identity()
+    uid = int(user_id)
+    # Host always sees their events. Organizers see events they work on, but not
+    # rows where they explicitly rejected the assignment (still on events list/Declined).
     events = Event.query.filter(
-        or_(Event.user_id == user_id, Event.organizer_id == user_id)
+        or_(
+            Event.user_id == uid,
+            and_(
+                Event.organizer_id == uid,
+                or_(
+                    Event.organizer_status.is_(None),
+                    Event.organizer_status != "rejected",
+                ),
+            ),
+        )
     ).all()
     results = []
     for event in events:

@@ -120,7 +120,7 @@ export function CreateEventModal({ open, onOpenChange }: CreateEventModalProps) 
               {/* Budget */}
               <div className="space-y-2">
                 <Label htmlFor="budget" className="text-sm font-normal text-gray-700">
-                  Budget ($)
+                  Budget (Rs)
                 </Label>
                 <Input
                   id="budget"
@@ -173,7 +173,7 @@ export function CreateEventModal({ open, onOpenChange }: CreateEventModalProps) 
                   </p>
                   <p>
                     <span className="font-semibold text-purple-600">Budget:</span>{" "}
-                    <span className="text-gray-600">${formData.budget || "0"}</span>
+                    <span className="text-gray-600">Rs {formData.budget || "0"}</span>
                   </p>
                 </div>
               </div>

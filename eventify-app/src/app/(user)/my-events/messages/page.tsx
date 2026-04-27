@@ -16,6 +16,7 @@ import {
     Circle,
 } from "lucide-react"
 import { toast } from "sonner"
+import { formatChatMessageTime } from "@/lib/format-chat-time"
 
 export default function UserMessagesPage() {
     return (
@@ -193,17 +194,6 @@ function UserMessagesContent() {
         }
     }
 
-    const formatTime = (ts: string) => {
-        if (!ts || ts === "No messages yet") return ""
-        const d = new Date(ts)
-        if (isNaN(d.getTime())) return ""
-        const now = new Date()
-        if (d.toDateString() === now.toDateString()) {
-            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        }
-        return d.toLocaleDateString([], { month: "short", day: "numeric" })
-    }
-
     const filtered = partners.filter(
         (p) =>
             p.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -249,7 +239,7 @@ function UserMessagesContent() {
                                     <div className="flex-1 min-w-0 text-left">
                                         <div className="flex justify-between items-center mb-0.5">
                                             <p className="text-sm font-black truncate">{p.name}</p>
-                                            <span className="text-[10px] font-bold opacity-60">{formatTime(p.last_message_time)}</span>
+                                            <span className="text-[10px] font-bold opacity-60">{formatChatMessageTime(p.last_message_time)}</span>
                                         </div>
                                         <p className="text-xs truncate font-medium opacity-70">{p.last_message}</p>
                                     </div>
@@ -326,7 +316,7 @@ function UserMessagesContent() {
                                                             {msg.message}
                                                         </div>
                                                         <p className={`text-[9px] font-black px-2 ${isMe ? "text-right text-slate-400" : "text-left text-slate-300"}`}>
-                                                            {formatTime(msg.created_at)}
+                                                            {formatChatMessageTime(msg.created_at)}
                                                         </p>
                                                     </div>
                                                 </div>

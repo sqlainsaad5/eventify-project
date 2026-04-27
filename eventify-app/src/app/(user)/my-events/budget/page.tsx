@@ -5,7 +5,6 @@ import Link from "next/link"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
-  DollarSign,
   Plus,
   AlertCircle,
   Wallet,
@@ -54,7 +53,7 @@ import { ReviewDialog } from "@/components/review-dialog"
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 function formatRs(n: number) {
-  return `Rs. ${n.toLocaleString()}`
+  return `Rs ${n.toLocaleString()}`
 }
 
 function formatDate(iso?: string | null) {
@@ -659,7 +658,7 @@ export default function BudgetPage() {
 
         {!selectedEventId && events.length === 0 && (
           <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-            <DollarSign className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+            <span className="text-3xl font-black text-slate-300 mx-auto mb-4 block text-center">Rs</span>
             <h3 className="font-bold text-slate-900">No events</h3>
             <p className="text-slate-500 text-sm mt-1 mb-6">Create an event to start tracking your budget.</p>
             <Link href="/my-events">
@@ -691,7 +690,7 @@ export default function BudgetPage() {
                     <CardContent className="space-y-4">
                       <div className="flex flex-wrap gap-4 items-end">
                         <div className="flex-1 min-w-[200px]">
-                          <Label>Total Budget (Rs.)</Label>
+                          <Label>Total Budget (Rs)</Label>
                           <Input
                             type="number"
                             value={budgetInput}
@@ -751,10 +750,10 @@ export default function BudgetPage() {
                             Set a positive total budget in Step 1 first — templates divide that amount across categories.
                           </p>
                         )}
-                        <Button type="button" onClick={openPlanEditor} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 w-full sm:w-auto">
+                        {/* <Button type="button" onClick={openPlanEditor} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 w-full sm:w-auto">
                           <LayoutList className="h-4 w-4 mr-2" />
                           Open budget plan editor
-                        </Button>
+                        </Button> */}
                       </div>
                     ) : (
                       <>
@@ -1150,7 +1149,7 @@ export default function BudgetPage() {
                     </Select>
                   </div>
                   <div>
-                    <Label>Agreed Price (Rs.)</Label>
+                    <Label>Agreed Price (Rs)</Label>
                     <Input
                       type="number"
                       value={newAgreementPrice}
@@ -1229,7 +1228,7 @@ export default function BudgetPage() {
                     />
                   </div>
                   <div className="sm:col-span-3 space-y-1">
-                    <Label className="text-xs">Planned (Rs.)</Label>
+                    <Label className="text-xs">Planned (Rs)</Label>
                     <Input
                       type="number"
                       min={0}

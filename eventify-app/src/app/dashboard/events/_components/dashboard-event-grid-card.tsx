@@ -184,7 +184,7 @@ export function DashboardEventGridCard({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-black text-slate-500">{statusLabel(event.status)}</span>
-                  <span className="text-purple-600 font-black">${(event.budget / 1000).toFixed(1)}k</span>
+                  <span className="text-purple-600 font-black">Rs {(event.budget / 1000).toFixed(1)}k</span>
                 </div>
               </div>
 

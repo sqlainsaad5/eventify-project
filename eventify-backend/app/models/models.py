@@ -1,3 +1,4 @@
+from app.utils.datetime_serialize import isoformat_utc_z
 from app.extensions import db
 from passlib.hash import bcrypt
 from datetime import datetime
@@ -255,7 +256,7 @@ class EventApplication(db.Model):
     event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
     organizer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     message = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(20), default="pending")  # pending, accepted, rejected
+    status = db.Column(db.String(20), default="pending")  # pending, accepted, rejected (other applicant chosen), declined (host declined, may re-apply)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
     __table_args__ = (db.UniqueConstraint("event_id", "organizer_id", name="uq_event_application_event_organizer"),)
@@ -471,8 +472,7 @@ class ChatMessage(db.Model):
             "event_name": self.event.name if self.event else "Unknown Event",
             "message": self.message,
             "is_read": self.is_read,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "timestamp": self.created_at.strftime("%I:%M %p") if self.created_at else None
+            "created_at": isoformat_utc_z(self.created_at),
         }
 
 

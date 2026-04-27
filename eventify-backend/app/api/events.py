@@ -17,11 +17,29 @@ from app.models import (
 import os
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, date, timezone, timedelta
 import requests
 from openai import OpenAI
 
 events_bp = Blueprint("events", __name__, url_prefix="/api/events")
+
+
+def _min_allowed_event_date_utc():
+    """First day allowed for a new/updated event date: UTC day after tomorrow."""
+    return datetime.now(timezone.utc).date() + timedelta(days=2)
+
+
+def _parse_event_date_value(value):
+    """Parse YYYY-MM-DD (or leading portion) to a date, or None if invalid."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if len(s) >= 10:
+        s = s[:10]
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
 
 
 def _event_recency_sort_key(event):
@@ -44,9 +62,9 @@ def generate_ai_suggestions(category: str, budget: float) -> list:
     """Generate AI suggestions for vendors/checklist based on category and budget."""
     if not client:
         return [
-            f"Recommended vendor for {category}: Local Caterers (~${budget * 0.3}).",
-            f"Checklist item: Book venue early to stay under ${budget}.",
-            f"Tip: Allocate 20% of ${budget} for decorations in {category} events."
+            f"Recommended vendor for {category}: Local Caterers (~Rs {budget * 0.3}).",
+            f"Checklist item: Book venue early to stay under Rs {budget}.",
+            f"Tip: Allocate 20% of Rs {budget} for decorations in {category} events."
         ]
 
     try:
@@ -54,7 +72,7 @@ def generate_ai_suggestions(category: str, budget: float) -> list:
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are an event planning assistant. Provide 3 concise suggestions for vendors or tips based on the event category and budget."},
-                {"role": "user", "content": f"Suggest 3 vendors or planning tips for a {category} event with budget ${budget}."}
+                {"role": "user", "content": f"Suggest 3 vendors or planning tips for a {category} event with budget Rs {budget}."}
             ],
             max_tokens=150
         )
@@ -126,7 +144,8 @@ def list_events():
     app_counts = defaultdict(int)
     if open_event_ids:
         counts = db.session.query(EventApplication.event_id, func.count(EventApplication.id)).filter(
-            EventApplication.event_id.in_(open_event_ids)
+            EventApplication.event_id.in_(open_event_ids),
+            EventApplication.status == "pending",
         ).group_by(EventApplication.event_id).all()
         for eid, c in counts:
             app_counts[eid] = c
@@ -187,6 +206,19 @@ def create_event():
         if budget <= 0:
             return jsonify({"error": "Budget must be greater than 0"}), 400
 
+        event_date = _parse_event_date_value(data["date"])
+        if event_date is None:
+            return jsonify({"error": "Invalid event date. Use YYYY-MM-DD."}), 400
+        if event_date < _min_allowed_event_date_utc():
+            return (
+                jsonify(
+                    {
+                        "error": "Event date must be at least two days in the future (day after tomorrow or later)."
+                    }
+                ),
+                400,
+            )
+
         image_url = data.get("image_url", "")
         
         # Handle file upload if present
@@ -226,7 +258,7 @@ def create_event():
         now = datetime.utcnow()
         event = Event(
             name=data["name"].strip(),
-            date=data["date"],
+            date=event_date.isoformat(),
             venue=data["venue"].strip(),
             vendor_category=data["vendor_category"],
             budget=budget,
@@ -295,8 +327,13 @@ def open_events_count():
     user = User.query.get(user_id)
     if not user or user.role != "organizer":
         return jsonify({"count": 0}), 200
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify({"count": 0}), 200
     applied_event_ids = [
-        a.event_id for a in EventApplication.query.filter_by(organizer_id=user_id).all()
+        a.event_id
+        for a in EventApplication.query.filter_by(organizer_id=uid, status="pending").all()
     ]
     query = Event.query.filter(
         Event.organizer_id.is_(None),
@@ -311,7 +348,7 @@ def open_events_count():
 @events_bp.route("/open", methods=["GET"])
 @jwt_required()
 def list_open_events():
-    """List events with no organizer (status=created). Organizers only. Exclude events current user already applied to."""
+    """List events with no organizer (status=created). Organizers only. Excludes events where the user has a *pending* application (declined may re-apply and see the event again)."""
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
     if not user:
@@ -319,18 +356,38 @@ def list_open_events():
     if user.role != "organizer":
         return jsonify({"error": "Only organizers can view open events"}), 403
 
-    applied_event_ids = [
-        a.event_id for a in EventApplication.query.filter_by(organizer_id=user_id).all()
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid user"}), 401
+
+    pending_event_ids = [
+        a.event_id
+        for a in EventApplication.query.filter_by(organizer_id=uid, status="pending").all()
     ]
     query = Event.query.filter(
         Event.organizer_id.is_(None),
-        Event.status == "created"
+        Event.status == "created",
     )
-    if applied_event_ids:
-        query = query.filter(~Event.id.in_(applied_event_ids))
+    if pending_event_ids:
+        query = query.filter(~Event.id.in_(pending_event_ids))
     open_events = query.all()
 
-    return jsonify([e.to_dict() for e in open_events]), 200
+    event_ids = [e.id for e in open_events]
+    my_apps = {}
+    if event_ids:
+        for a in EventApplication.query.filter(
+            EventApplication.event_id.in_(event_ids),
+            EventApplication.organizer_id == uid,
+        ).all():
+            my_apps[a.event_id] = a.status
+
+    out = []
+    for e in open_events:
+        d = e.to_dict()
+        d["my_application_status"] = my_apps.get(e.id)  # e.g. "declined" or None if no row
+        out.append(d)
+    return jsonify(out), 200
 
 
 @events_bp.route("/<int:event_id>/apply", methods=["POST"])
@@ -352,14 +409,42 @@ def apply_to_event(event_id):
     if event.status != "created":
         return jsonify({"error": "Event is not open for applications"}), 400
 
-    existing = EventApplication.query.filter_by(event_id=event_id, organizer_id=user_id).first()
-    if existing:
-        return jsonify({"error": "You have already applied to this event"}), 409
-
     data = request.get_json() or {}
     message = (data.get("message") or "").strip() or None
 
-    app = EventApplication(event_id=event_id, organizer_id=user_id, message=message, status="pending")
+    existing = EventApplication.query.filter_by(event_id=event_id, organizer_id=user_id).first()
+    if existing:
+        if existing.status == "pending":
+            return jsonify({"error": "You have already applied to this event"}), 409
+        if existing.status == "declined":
+            existing.message = message
+            existing.status = "pending"
+            db.session.commit()
+            try:
+                from app.api.payments import create_notification
+                create_notification(
+                    event.user_id,
+                    "New application",
+                    f"An organizer re-applied to your event '{event.name}'.",
+                    "info",
+                    {"event_id": event.id, "action": "view_applications"},
+                )
+            except Exception as e:
+                print(f"Re-apply notification failed: {e}")
+            return (
+                jsonify(
+                    {
+                        "message": "Application submitted",
+                        "application": existing.to_dict(),
+                    }
+                ),
+                201,
+            )
+        return jsonify({"error": "You cannot apply again to this event"}), 409
+
+    app = EventApplication(
+        event_id=event_id, organizer_id=user_id, message=message, status="pending"
+    )
     db.session.add(app)
     db.session.commit()
 
@@ -444,6 +529,63 @@ def list_event_applications(event_id):
         return d
 
     return jsonify([serialize_application(a) for a in applications]), 200
+
+
+@events_bp.route("/<int:event_id>/decline-application", methods=["POST"])
+@jwt_required()
+def decline_organizer_application(event_id):
+    """Event owner declines a pending application. Body: { \"organizer_id\": <id> }. Organizer may re-apply (status becomes declined)."""
+    user_id = get_jwt_identity()
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid user"}), 401
+    event = Event.query.filter_by(id=event_id).first()
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    if event.user_id != user_id:
+        return jsonify({"error": "Only the event owner can decline applications"}), 403
+    if event.organizer_id is not None:
+        return jsonify({"error": "Event already has an organizer"}), 400
+    if event.status != "created":
+        return jsonify({"error": "Event is not open for this action"}), 400
+
+    data = request.get_json() or {}
+    organizer_id = data.get("organizer_id")
+    if organizer_id is None:
+        return jsonify({"error": "organizer_id required"}), 400
+    try:
+        organizer_id = int(organizer_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "organizer_id must be an integer"}), 400
+
+    application = EventApplication.query.filter_by(
+        event_id=event_id, organizer_id=organizer_id, status="pending"
+    ).first()
+    if not application:
+        return jsonify({"error": "No pending application from this organizer"}), 400
+
+    application.status = "declined"
+    db.session.commit()
+
+    try:
+        from app.api.payments import create_notification
+        create_notification(
+            int(organizer_id),
+            "Application declined",
+            f"Your application to the event \"{event.name}\" was declined by the host.",
+            "info",
+            {"event_id": event.id, "action": "open_events", "application_status": "declined"},
+        )
+    except Exception as e:
+        print(f"Decline application notification failed: {e}")
+
+    return jsonify(
+        {
+            "message": "Application declined",
+            "application": application.to_dict(),
+        }
+    ), 200
 
 
 @events_bp.route("/<int:event_id>/assign-organizer", methods=["POST"])
@@ -532,6 +674,20 @@ def update_event(event_id):
             if field in data and str(data[field]).strip():
                 if field == "budget" or field == "progress":
                     setattr(event, field, float(data[field]))
+                elif field == "date":
+                    new_date = _parse_event_date_value(data[field])
+                    if new_date is None:
+                        return jsonify({"error": "Invalid event date. Use YYYY-MM-DD."}), 400
+                    if new_date < _min_allowed_event_date_utc():
+                        return (
+                            jsonify(
+                                {
+                                    "error": "Event date must be at least two days in the future (day after tomorrow or later)."
+                                }
+                            ),
+                            400,
+                        )
+                    setattr(event, field, new_date.isoformat())
                 else:
                     setattr(event, field, data[field])
         if "budget" in data:
@@ -803,13 +959,16 @@ def respond_assignment(event_id):
         if not event:
             return jsonify({"error": "Assignment not found or unauthorized"}), 404
 
+        decliner_name = event.organizer.name if event.organizer else "Organizer"
+
         event.organizer_status = status
         # Update high-level lifecycle status
         if status == "accepted":
             event.status = "pending_advance_payment"
         elif status == "rejected":
-            # Return event to a generic created state for the owner
+            # Return event to a generic created state for the owner; clear slot so host can pick another
             event.status = "created"
+            event.organizer_id = None
 
         event.updated_at = datetime.utcnow()
         db.session.commit()
@@ -818,7 +977,7 @@ def respond_assignment(event_id):
         try:
             from app.api.payments import create_notification
             icon = "✅" if status == "accepted" else "❌"
-            msg = f"Your event expert '{event.organizer.name}' has {status} the assignment for '{event.name}'."
+            msg = f"Your event expert '{decliner_name}' has {status} the assignment for '{event.name}'."
             create_notification(
                 event.user_id,
                 f"{icon} Assignment {status.capitalize()}",
@@ -836,6 +995,67 @@ def respond_assignment(event_id):
 
     except Exception as e:
         print(f"❌ Error in respond_assignment: {str(e)}")
+        db.session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@events_bp.route("/<int:event_id>/reassign-organizer", methods=["POST"])
+@jwt_required()
+def reassign_organizer(event_id):
+    """
+    Event owner picks a new organizer after a previous one declined the assignment.
+    Requires status 'created' and organizer_status 'rejected'; organizer_id should be
+    null after decline (or legacy: still reassign on same state).
+    """
+    try:
+        user_id = get_jwt_identity()
+        event = Event.query.filter_by(id=event_id, user_id=user_id).first()
+        if not event:
+            return jsonify({"error": "Event not found or unauthorized"}), 404
+        if event.status != "created" or event.organizer_status != "rejected":
+            return jsonify(
+                {"error": "Event is not available for reassignment in its current state."}
+            ), 400
+
+        data = request.get_json() or {}
+        org_id = data.get("organizer_id")
+        if org_id is None:
+            return jsonify({"error": "organizer_id required"}), 400
+        try:
+            org_id = int(org_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "organizer_id must be an integer"}), 400
+
+        organizer = User.query.get(org_id)
+        if not organizer or organizer.role != "organizer":
+            return jsonify({"error": "Invalid organizer selected"}), 400
+        if org_id == int(user_id):
+            return jsonify({"error": "You cannot assign yourself as organizer for this event."}), 400
+
+        event.organizer_id = org_id
+        event.organizer_status = "pending"
+        event.status = "awaiting_organizer_confirmation"
+        event.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        try:
+            from app.api.payments import create_notification
+            create_notification(
+                int(org_id),
+                "📅 New Event Assignment",
+                f"A new event '{event.name}' has been assigned to you. Review the details and respond.",
+                "priority",
+                {"event_id": event.id, "action": "assignment_review"},
+            )
+        except Exception as e:
+            print(f"Reassign organizer notification failed: {e}")
+
+        return jsonify(
+            {"message": "Organizer assigned successfully", "event": event.to_dict()}
+        ), 200
+
+    except Exception as e:
+        print(f"❌ Error in reassign_organizer: {str(e)}")
         db.session.rollback()
         return jsonify({"error": "Internal server error"}), 500
 

@@ -24,7 +24,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from "recharts";
-import { UserPlus, DollarSign } from "lucide-react";
+import { UserPlus } from "lucide-react";
 
 const API_BASE = "http://localhost:5000";
 
@@ -145,7 +145,7 @@ export default function AdminAnalyticsPage() {
         <Card className="rounded-2xl border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <DollarSign className="size-5" />
+              <span className="text-sm font-bold">Rs</span>
               Revenue
             </CardTitle>
             <CardDescription>Payment revenue by date</CardDescription>

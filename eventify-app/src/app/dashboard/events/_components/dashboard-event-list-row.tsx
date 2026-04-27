@@ -79,7 +79,7 @@ export function DashboardEventListRow({
         </Badge>
       </td>
       <td className="px-6 py-5">
-        <span className="font-black text-slate-900">Rs. {event.budget.toLocaleString()}</span>
+        <span className="font-black text-slate-900">Rs {event.budget.toLocaleString()}</span>
       </td>
       <td className="px-6 py-5">
         <div className="w-40 space-y-1.5">

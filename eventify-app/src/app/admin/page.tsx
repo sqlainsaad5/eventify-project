@@ -32,7 +32,6 @@ import {
   TrendingUp,
   Zap,
   UserPlus,
-  DollarSign,
 } from "lucide-react";
 
 interface OverviewData {
@@ -198,7 +197,7 @@ export default function AdminOverviewPage() {
               {overview?.events?.total ?? 0}
             </div>
             <p className="text-xs text-muted-foreground">
-              Total budget: ${(overview?.events?.total_budget ?? 0).toFixed(2)}
+              Total budget: Rs {(overview?.events?.total_budget ?? 0).toFixed(2)}
               {(overview?.events?.pending_organizer ?? 0) > 0 && (
                 <> · Pending: {overview.events.pending_organizer}</>
               )}
@@ -215,7 +214,7 @@ export default function AdminOverviewPage() {
           </CardHeader>
           <CardContent className="space-y-1">
             <div className="text-3xl font-bold text-foreground">
-              ${(overview?.payments?.total_revenue ?? 0).toFixed(2)}
+              Rs {(overview?.payments?.total_revenue ?? 0).toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
               Total payments: {overview?.payments?.total ?? 0} · Pending
@@ -275,7 +274,7 @@ export default function AdminOverviewPage() {
         <Card className="rounded-2xl border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <DollarSign className="size-5" />
+              <span className="text-sm font-bold">Rs</span>
               Revenue (last 30 days)
             </CardTitle>
             <CardDescription>Payment revenue by date</CardDescription>
@@ -378,7 +377,7 @@ export default function AdminOverviewPage() {
                   >
                     <div>
                       <span className="font-medium text-foreground">
-                        ${Number(p.amount).toFixed(2)}
+                        Rs {Number(p.amount).toFixed(2)}
                       </span>
                       {p.event_name && (
                         <span className="ml-2 text-muted-foreground">

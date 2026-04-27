@@ -15,8 +15,10 @@ type Props = {
     applications: EventApplicationRow[]
     loadingApplications: boolean
     assigningOrganizerId: number | null
+    decliningOrganizerId: number | null
     applicationOrganizerSummaries: OrganizerRatingSummaries
     onAssign: (eventId: number, organizerId: number) => void
+    onDecline: (eventId: number, organizerId: number) => void
     reviewDialog: { eventId: number; organizerId: number; organizerName: string } | null
     setReviewDialog: (v: { eventId: number; organizerId: number; organizerName: string } | null) => void
     onSubmitReview: (rating: number, comment: string | undefined) => Promise<void>
@@ -43,8 +45,10 @@ export function MyEventsModals({
     applications,
     loadingApplications,
     assigningOrganizerId,
+    decliningOrganizerId,
     applicationOrganizerSummaries,
     onAssign,
+    onDecline,
     reviewDialog,
     setReviewDialog,
     onSubmitReview,
@@ -59,6 +63,8 @@ export function MyEventsModals({
         () => applications.filter((a) => a.status === "pending").length,
         [applications],
     )
+
+    const actionBusy = assigningOrganizerId !== null || decliningOrganizerId !== null
 
     return (
         <>
@@ -134,8 +140,24 @@ export function MyEventsModals({
                                                             View Details
                                                         </Button>
                                                         <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            onClick={() => {
+                                                                if (applicationsModalEventId == null) return
+                                                                void onDecline(applicationsModalEventId, app.organizer_id)
+                                                            }}
+                                                            disabled={actionBusy}
+                                                            className="rounded-xl font-black text-[10px] uppercase border-rose-200 text-rose-700 hover:bg-rose-50"
+                                                        >
+                                                            {decliningOrganizerId === app.organizer_id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                "Decline"
+                                                            )}
+                                                        </Button>
+                                                        <Button
                                                             onClick={() => onAssign(applicationsModalEventId, app.organizer_id)}
-                                                            disabled={assigningOrganizerId !== null}
+                                                            disabled={actionBusy}
                                                             className="rounded-xl bg-indigo-600 hover:bg-indigo-700 font-black text-[10px] uppercase"
                                                         >
                                                             {assigningOrganizerId === app.organizer_id ? (
@@ -168,11 +190,7 @@ export function MyEventsModals({
                 org={organizerDetailView}
                 organizerSummaries={applicationOrganizerSummaries}
                 primaryLabel="Assign this organizer"
-                primaryDisabled={
-                    assigningOrganizerId !== null &&
-                    organizerDetailView != null &&
-                    assigningOrganizerId !== organizerDetailView.id
-                }
+                primaryDisabled={actionBusy}
                 primaryLoading={
                     organizerDetailView != null && assigningOrganizerId === organizerDetailView.id
                 }
@@ -180,6 +198,15 @@ export function MyEventsModals({
                     if (!organizerDetailView || applicationsModalEventId == null) return
                     void onAssign(applicationsModalEventId, organizerDetailView.id)
                 }}
+                secondaryLabel="Decline this application"
+                onSecondary={() => {
+                    if (!organizerDetailView || applicationsModalEventId == null) return
+                    void onDecline(applicationsModalEventId, organizerDetailView.id)
+                }}
+                secondaryLoading={
+                    organizerDetailView != null && decliningOrganizerId === organizerDetailView.id
+                }
+                secondaryDisabled={actionBusy}
             />
 
             <ReviewDialog

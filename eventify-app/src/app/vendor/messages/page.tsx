@@ -19,6 +19,7 @@ import {
   Circle
 } from "lucide-react"
 import { toast } from "sonner"
+import { formatChatMessageTime } from "@/lib/format-chat-time"
 
 export default function VendorMessagesPage() {
   return (
@@ -216,17 +217,6 @@ function VendorMessagesContent() {
     }
   }
 
-  const formatTime = (ts: string) => {
-    if (!ts || ts === "No messages yet") return ""
-    const d = new Date(ts)
-    if (isNaN(d.getTime())) return ""
-    const now = new Date()
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    }
-    return d.toLocaleDateString([], { month: "short", day: "numeric" })
-  }
-
   const filtered = organizers.filter(
     (o) =>
       o.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -318,7 +308,7 @@ function VendorMessagesContent() {
                           {org.name}
                         </p>
                         <span className={`text-[10px] ${selectedOrg?.id === org.id ? "text-purple-100" : "text-slate-400"}`}>
-                          {formatTime(org.last_message_time)}
+                          {formatChatMessageTime(org.last_message_time)}
                         </span>
                       </div>
                       <p className={`text-xs truncate font-medium mt-0.5 ${selectedOrg?.id === org.id ? "text-purple-50" : "text-slate-500"}`}>
@@ -410,7 +400,7 @@ function VendorMessagesContent() {
                                 <p className="font-medium leading-relaxed">{msg.message}</p>
                               </div>
                               <p className={`text-[10px] font-bold px-1 ${isMe ? "text-right text-purple-400" : "text-left text-slate-300"}`}>
-                                {msg.timestamp || formatTime(msg.created_at)}
+                                {formatChatMessageTime(msg.created_at)}
                               </p>
                             </div>
                           </div>

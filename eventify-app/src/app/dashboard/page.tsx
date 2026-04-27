@@ -10,7 +10,6 @@ import {
   Users,
   TrendingUp,
   ArrowRight,
-  Sparkles,
   MapPin,
   Clock,
   Loader2,
@@ -194,7 +193,12 @@ export default function DashboardPage() {
   const totalVendors = Array.isArray(vendors) ? vendors.length : 0
 
   const sortedUpcoming = [...eventList]
-    .filter(e => e?.date && new Date(e.date) >= new Date())
+    .filter(
+      (e) =>
+        e?.date &&
+        new Date(e.date) >= new Date() &&
+        e.organizer_status !== "rejected"
+    )
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 3)
 
@@ -260,10 +264,10 @@ export default function DashboardPage() {
             title="Total earnings"
             value={
               organizerEarnings >= 1_000_000
-                ? `Rs. ${(organizerEarnings / 1_000_000).toFixed(2)}M`
+                ? `Rs ${(organizerEarnings / 1_000_000).toFixed(2)}M`
                 : organizerEarnings >= 1000
-                  ? `Rs. ${(organizerEarnings / 1000).toFixed(1)}k`
-                  : `Rs. ${Math.round(organizerEarnings).toLocaleString()}`
+                  ? `Rs ${(organizerEarnings / 1000).toFixed(1)}k`
+                  : `Rs ${Math.round(organizerEarnings).toLocaleString()}`
             }
             trend="Organizer fees received"
             icon={<Wallet className="h-5 w-5 text-amber-600" />}
@@ -429,25 +433,6 @@ export default function DashboardPage() {
           </div>
 
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">Intelligent Insights</h2>
-            <Card className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white border-none shadow-xl shadow-purple-200 ring-1 ring-white/20 rounded-[32px] overflow-hidden">
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-2 text-indigo-100 mb-1">
-                  <Sparkles className="h-4 w-4" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">AI Suggestion</span>
-                </div>
-                <CardTitle className="text-lg">Resource Optimization</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-indigo-50/90 leading-relaxed italic">
-                  {eventList.length > 0
-                    ? `You have ${eventList.length} active projects. Using dynamic vendor assignments could reduce overhead by 12% across your schedule.`
-                    : "Plan your first event to receive personalized recommendations on budgeting and venue selection."
-                  }
-                </p>
-              </CardContent>
-            </Card>
-
             <Card className="border-slate-200/60 shadow-sm rounded-3xl">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Quick Actions</CardTitle>
@@ -465,9 +450,9 @@ export default function DashboardPage() {
                   </Button>
                 </Link>
                 <Link href="/my-events/budget">
-                  <Button variant="outline" className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl" size="sm">
+                  {/* <Button variant="outline" className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl" size="sm">
                     View Budget Report
-                  </Button>
+                  </Button> */}
                 </Link>
               </CardContent>
             </Card>

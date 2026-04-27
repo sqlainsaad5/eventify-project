@@ -14,6 +14,7 @@ export function useMyEventsDashboard() {
     const [applications, setApplications] = useState<EventApplicationRow[]>([])
     const [loadingApplications, setLoadingApplications] = useState(false)
     const [assigningOrganizerId, setAssigningOrganizerId] = useState<number | null>(null)
+    const [decliningOrganizerId, setDecliningOrganizerId] = useState<number | null>(null)
     const [applicationOrganizerSummaries, setApplicationOrganizerSummaries] = useState<OrganizerRatingSummaries>({})
     const [reviewStatusByEvent, setReviewStatusByEvent] = useState<Record<number, EventReviewStatus>>({})
     const [reviewDialog, setReviewDialog] = useState<{
@@ -95,46 +96,57 @@ export function useMyEventsDashboard() {
         }
     }, [])
 
-    const openApplicationsModal = useCallback(async (eventId: number) => {
-        setApplicationsModalEventId(eventId)
-        setApplications([])
-        setApplicationOrganizerSummaries({})
-        setLoadingApplications(true)
-        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-        try {
-            const res = await fetch(`${MY_EVENTS_API_BASE}/api/events/${eventId}/applications`, {
-                headers: { Authorization: `Bearer ${token}` },
-            })
-                    if (res.ok) {
-                const data = await res.json()
-                const list = Array.isArray(data) ? data : []
-                setApplications(list)
-                void loadApplicationOrganizerSummaries(list)
-                if (token) {
-                    void fetch(`${MY_EVENTS_API_BASE}/api/payments/notifications/mark-read-by-action`, {
-                        method: "PUT",
-                        headers: {
-                            "Content-Type": "application/json",
-                            Authorization: `Bearer ${token}`,
-                        },
-                        body: JSON.stringify({ action: "view_applications", event_id: eventId }),
-                    })
-                        .then((r) => {
-                            if (r.ok && typeof window !== "undefined") {
-                                window.dispatchEvent(new Event("refresh-notifications"))
-                            }
-                        })
-                        .catch(() => {})
+    const reloadApplications = useCallback(
+        async (eventId: number) => {
+            setLoadingApplications(true)
+            const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+            try {
+                const res = await fetch(`${MY_EVENTS_API_BASE}/api/events/${eventId}/applications`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                })
+                if (res.ok) {
+                    const data = await res.json()
+                    const list = Array.isArray(data) ? data : []
+                    setApplications(list)
+                    void loadApplicationOrganizerSummaries(list)
+                } else {
+                    toast.error("Failed to load applications")
                 }
-            } else {
+            } catch {
                 toast.error("Failed to load applications")
+            } finally {
+                setLoadingApplications(false)
             }
-        } catch {
-            toast.error("Failed to load applications")
-        } finally {
-            setLoadingApplications(false)
-        }
-    }, [loadApplicationOrganizerSummaries])
+        },
+        [loadApplicationOrganizerSummaries]
+    )
+
+    const openApplicationsModal = useCallback(
+        async (eventId: number) => {
+            setApplicationsModalEventId(eventId)
+            setApplications([])
+            setApplicationOrganizerSummaries({})
+            await reloadApplications(eventId)
+            const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+            if (token) {
+                void fetch(`${MY_EVENTS_API_BASE}/api/payments/notifications/mark-read-by-action`, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ action: "view_applications", event_id: eventId }),
+                })
+                    .then((r) => {
+                        if (r.ok && typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("refresh-notifications"))
+                        }
+                    })
+                    .catch(() => {})
+            }
+        },
+        [reloadApplications]
+    )
 
     const fetchEvents = useCallback(
         async (opts?: { silent?: boolean }): Promise<UserDashboardEvent[]> => {
@@ -286,6 +298,37 @@ export function useMyEventsDashboard() {
         }
     }
 
+    const handleDeclineApplication = async (eventId: number, organizerId: number) => {
+        const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+        if (!token) return
+        setDecliningOrganizerId(organizerId)
+        try {
+            const res = await fetch(
+                `${MY_EVENTS_API_BASE}/api/events/${eventId}/decline-application`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ organizer_id: organizerId }),
+                }
+            )
+            if (res.ok) {
+                toast.success("Application declined")
+                await reloadApplications(eventId)
+                await fetchEvents({ silent: true })
+            } else {
+                const data = await res.json()
+                toast.error(data.error || "Failed to decline application")
+            }
+        } catch {
+            toast.error("Failed to decline application")
+        } finally {
+            setDecliningOrganizerId(null)
+        }
+    }
+
     const submitReview = async (rating: number, comment: string | undefined) => {
         if (!reviewDialog) return
         const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
@@ -325,6 +368,7 @@ export function useMyEventsDashboard() {
         applications,
         loadingApplications,
         assigningOrganizerId,
+        decliningOrganizerId,
         applicationOrganizerSummaries,
         reviewStatusByEvent,
         reviewDialog,
@@ -333,6 +377,7 @@ export function useMyEventsDashboard() {
         handleDelete,
         openApplicationsModal,
         handleAssignOrganizer,
+        handleDeclineApplication,
         submitReview,
     }
 }

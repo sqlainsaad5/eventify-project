@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Briefcase,
-  DollarSign,
   CheckCircle,
   ArrowRight,
   Calendar,
@@ -263,6 +262,42 @@ export default function VendorDashboard() {
           </Link>
         </div>
 
+        {/* Vital Stats */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            title="Active Events"
+            value={activeEvents.length.toString()}
+            trend="Currently assigned"
+            icon={<Calendar className="h-5 w-5 text-blue-600" />}
+            bgColor="bg-blue-50"
+            href="/vendor/bookings"
+          />
+          <StatCard
+            title="Completed"
+            value={completedEvents.length.toString()}
+            trend="Events finished"
+            icon={<CheckCircle className="h-5 w-5 text-emerald-600" />}
+            bgColor="bg-emerald-50"
+            href="/vendor/bookings?tab=completed"
+          />
+          <StatCard
+            title="My Services"
+            value={activeServices.length.toString()}
+            trend="Active listings"
+            icon={<Briefcase className="h-5 w-5 text-purple-600" />}
+            bgColor="bg-purple-50"
+            href="/vendor/services"
+          />
+          <StatCard
+            title="Total Events"
+            value={assignedEvents.length.toString()}
+            trend="All time"
+            icon={<TrendingUp className="h-5 w-5 text-amber-600" />}
+            bgColor="bg-amber-50"
+            href="/vendor/analytics"
+          />
+        </div>
+
         {partnershipRequests.length > 0 && (
           <Card className="border-amber-200/80 bg-amber-50/40 shadow-sm rounded-3xl overflow-hidden">
             <div className="p-6 md:p-7">
@@ -329,42 +364,6 @@ export default function VendorDashboard() {
             </div>
           </Card>
         )}
-
-        {/* Vital Stats */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            title="Active Events"
-            value={activeEvents.length.toString()}
-            trend="Currently assigned"
-            icon={<Calendar className="h-5 w-5 text-blue-600" />}
-            bgColor="bg-blue-50"
-            href="/vendor/bookings"
-          />
-          <StatCard
-            title="Completed"
-            value={completedEvents.length.toString()}
-            trend="Events finished"
-            icon={<CheckCircle className="h-5 w-5 text-emerald-600" />}
-            bgColor="bg-emerald-50"
-            href="/vendor/bookings?tab=completed"
-          />
-          <StatCard
-            title="My Services"
-            value={activeServices.length.toString()}
-            trend="Active listings"
-            icon={<Briefcase className="h-5 w-5 text-purple-600" />}
-            bgColor="bg-purple-50"
-            href="/vendor/services"
-          />
-          <StatCard
-            title="Total Events"
-            value={assignedEvents.length.toString()}
-            trend="All time"
-            icon={<TrendingUp className="h-5 w-5 text-amber-600" />}
-            bgColor="bg-amber-50"
-            href="/vendor/analytics"
-          />
-        </div>
 
         {/* Organizer professional ratings */}
         <Card className="border-slate-200/80 shadow-lg shadow-slate-200/40 rounded-[28px] overflow-hidden bg-white">
@@ -449,11 +448,13 @@ export default function VendorDashboard() {
           </div>
         </Card>
 
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Upcoming Events */}
-          <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-10">
+          {/* Upcoming Events — full width so cards can use the full row */}
+          <section className="space-y-5" aria-labelledby="upcoming-events-heading">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900">Upcoming Events</h2>
+              <h2 id="upcoming-events-heading" className="text-xl font-bold text-slate-900">
+                Upcoming Events
+              </h2>
               {allUpcomingEvents.length > 0 && (
                 <Link
                   href="/vendor/bookings"
@@ -467,7 +468,7 @@ export default function VendorDashboard() {
             <div className="space-y-4">
               {upcomingEvents.length > 0 ? (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                     {upcomingEvents.map((event) => (
                       <Card
                         key={event.id}
@@ -507,10 +508,7 @@ export default function VendorDashboard() {
                               <MapPin className="h-3.5 w-3.5 shrink-0" />
                               {event.venue}
                             </p>
-                            <p className="flex items-center gap-1.5">
-                              <DollarSign className="h-3.5 w-3.5 shrink-0" />
-                              Rs. {event.budget?.toLocaleString()}
-                            </p>
+                            <p className="flex items-center gap-1.5">Rs {event.budget?.toLocaleString()}</p>
                           </div>
                           <Button
                             type="button"
@@ -563,83 +561,81 @@ export default function VendorDashboard() {
                 </div>
               )}
             </div>
-          </div>
+          </section>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            <h2 className="text-xl font-bold text-slate-900">Quick Actions</h2>
+          {/* Quick access: balanced row — no narrow sidebar beside empty space */}
+          <section
+            className="rounded-[28px] border border-slate-200/80 bg-slate-50/50 p-4 sm:p-5 shadow-sm"
+            aria-labelledby="quick-access-heading"
+          >
+            <h2 id="quick-access-heading" className="sr-only">
+              Quick access
+            </h2>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+              <Card className="flex min-h-0 flex-col border-none bg-gradient-to-br from-indigo-600 to-purple-700 text-white shadow-lg shadow-indigo-200/30 ring-1 ring-white/15 rounded-[24px]">
+                <CardHeader className="pb-2 pt-6 sm:pt-7">
+                  <div className="mb-1 flex items-center gap-2 text-indigo-100">
+                    <Briefcase className="h-4 w-4" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">Vendor hub</span>
+                  </div>
+                  <CardTitle className="text-lg leading-snug">Manage your business</CardTitle>
+                </CardHeader>
+                <CardContent className="mt-auto space-y-4 px-6 pb-6 sm:px-7 sm:pb-7">
+                  <p className="text-sm leading-relaxed text-indigo-50/90">
+                    {assignedEvents.length > 0
+                      ? `You have ${activeEvents.length} active event${activeEvents.length !== 1 ? "s" : ""}. Keep your services updated to attract more organizers.`
+                      : "Add your services and keep your profile updated to get assigned to events by organizers."}
+                  </p>
+                  <Link href="/vendor/services" className="block">
+                    <Button className="h-11 w-full rounded-xl border border-white/20 bg-white/20 text-white backdrop-blur-md hover:bg-white/30">
+                      Manage services
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
 
-            <Card className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white border-none shadow-xl shadow-purple-200 ring-1 ring-white/20 rounded-[32px] overflow-hidden">
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-2 text-indigo-100 mb-1">
-                  <Briefcase className="h-4 w-4" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">Vendor Hub</span>
-                </div>
-                <CardTitle className="text-lg">Manage Your Business</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-indigo-50/90 leading-relaxed">
-                  {assignedEvents.length > 0
-                    ? `You have ${activeEvents.length} active event${activeEvents.length !== 1 ? "s" : ""}. Keep your services updated to attract more organizers.`
-                    : "Add your services and keep your profile updated to get assigned to events by organizers."}
-                </p>
-                <Link href="/vendor/services">
-                  <Button className="w-full bg-white/20 hover:bg-white/30 border-white/10 text-white backdrop-blur-md rounded-xl">
-                    Manage Services
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200/60 shadow-sm rounded-3xl">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Quick Links</CardTitle>
-                <CardDescription>Common vendor tasks</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-2">
-                <Link href="/vendor/bookings">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl"
-                    size="sm"
-                  >
-                    <Calendar className="h-4 w-4 mr-2 text-purple-500" />
-                    View Assigned Events
-                  </Button>
-                </Link>
-                <Link href="/vendor/messages">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl"
-                    size="sm"
-                  >
-                    <MessageSquare className="h-4 w-4 mr-2 text-blue-500" />
-                    Messages
-                  </Button>
-                </Link>
-                <Link href="/vendor/analytics">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl"
-                    size="sm"
-                  >
-                    <BarChart3 className="h-4 w-4 mr-2 text-emerald-500" />
-                    View Analytics
-                  </Button>
-                </Link>
-                <Link href="/vendor/profile">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl"
-                    size="sm"
-                  >
-                    <User className="h-4 w-4 mr-2 text-amber-500" />
-                    Update Profile
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          </div>
+              <Card className="flex min-h-0 flex-col rounded-[24px] border-slate-200/80 bg-white shadow-sm">
+                <CardHeader className="space-y-1 border-b border-slate-100 pb-3 pt-6 sm:pt-7">
+                  <CardTitle className="text-base">Quick links</CardTitle>
+                  <CardDescription>Jump to the tools you use most</CardDescription>
+                </CardHeader>
+                <CardContent className="grid flex-1 grid-cols-1 gap-2.5 p-4 sm:grid-cols-2 sm:p-5 sm:pt-4">
+                  <Link href="/vendor/bookings" className="block min-h-0">
+                    <span className="flex h-full min-h-[3.25rem] w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 text-left text-sm font-semibold text-slate-700 transition-colors hover:border-purple-200 hover:bg-white hover:shadow-sm">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-purple-100 text-purple-600">
+                        <Calendar className="h-4 w-4" />
+                      </span>
+                      <span className="leading-tight">Assigned events</span>
+                    </span>
+                  </Link>
+                  <Link href="/vendor/messages" className="block min-h-0">
+                    <span className="flex h-full min-h-[3.25rem] w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 text-left text-sm font-semibold text-slate-700 transition-colors hover:border-sky-200 hover:bg-white hover:shadow-sm">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
+                        <MessageSquare className="h-4 w-4" />
+                      </span>
+                      <span className="leading-tight">Messages</span>
+                    </span>
+                  </Link>
+                  <Link href="/vendor/analytics" className="block min-h-0">
+                    <span className="flex h-full min-h-[3.25rem] w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 text-left text-sm font-semibold text-slate-700 transition-colors hover:border-emerald-200 hover:bg-white hover:shadow-sm">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600">
+                        <BarChart3 className="h-4 w-4" />
+                      </span>
+                      <span className="leading-tight">Analytics</span>
+                    </span>
+                  </Link>
+                  <Link href="/vendor/profile" className="block min-h-0">
+                    <span className="flex h-full min-h-[3.25rem] w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 text-left text-sm font-semibold text-slate-700 transition-colors hover:border-amber-200 hover:bg-white hover:shadow-sm">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                        <User className="h-4 w-4" />
+                      </span>
+                      <span className="leading-tight">Profile</span>
+                    </span>
+                  </Link>
+                </CardContent>
+              </Card>
+            </div>
+          </section>
         </div>
       </div>
     </VendorLayout>

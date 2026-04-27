@@ -21,7 +21,6 @@ import {
     ArrowRight,
     Calendar,
     MapPin,
-    DollarSign,
     Users,
     Image as ImageIcon,
     Target,
@@ -44,6 +43,7 @@ import {
 import { OrganizerProfileSheet } from "@/app/(user)/my-events/_components/organizer-profile-sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { getMinSelectableEventDateString } from "@/lib/min-event-date"
 import {
     availabilityBadgeClass,
     availabilityLabel,
@@ -171,8 +171,6 @@ export default function EventDetailsPage() {
             setLoadingOrganizers(false)
         }
     }
-
-    const getCurrentDate = () => new Date().toISOString().split("T")[0]
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -784,7 +782,7 @@ export default function EventDetailsPage() {
                                                 id="date"
                                                 required
                                                 type="date"
-                                                min={getCurrentDate()}
+                                                min={getMinSelectableEventDateString()}
                                                 className="h-14 pl-12 bg-slate-50 border-none rounded-2xl font-black focus-visible:ring-2 focus-visible:ring-indigo-500/30"
                                                 value={formData.date}
                                                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
@@ -793,10 +791,10 @@ export default function EventDetailsPage() {
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="budget" className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                            Total Budget ($) *
+                                            Total Budget (Rs) *
                                         </Label>
                                         <div className="relative group">
-                                            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 group-focus-within:text-indigo-600 pointer-events-none">Rs</span>
                                             <Input
                                                 id="budget"
                                                 required

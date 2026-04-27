@@ -19,6 +19,7 @@ import {
     Briefcase
 } from "lucide-react"
 import { toast } from "sonner"
+import { formatChatMessageTime } from "@/lib/format-chat-time"
 
 export default function OrganizerMessagesPage() {
     return (
@@ -198,17 +199,6 @@ function OrganizerMessagesContent() {
         }
     }
 
-    const formatTime = (ts: string) => {
-        if (!ts || ts === "No messages yet") return ""
-        const d = new Date(ts)
-        if (isNaN(d.getTime())) return ""
-        const now = new Date()
-        if (d.toDateString() === now.toDateString()) {
-            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        }
-        return d.toLocaleDateString([], { month: "short", day: "numeric" })
-    }
-
     const filtered = partners.filter(
         (p) =>
             p.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -274,7 +264,7 @@ function OrganizerMessagesContent() {
                                     <div className="flex-1 min-w-0 text-left">
                                         <div className="flex justify-between items-center mb-0.5">
                                             <p className="text-sm font-bold truncate leading-none">{p.name}</p>
-                                            <span className="text-[9px] font-black opacity-60 uppercase">{formatTime(p.last_message_time)}</span>
+                                            <span className="text-[9px] font-black opacity-60 uppercase">{formatChatMessageTime(p.last_message_time)}</span>
                                         </div>
                                         <div className="flex items-center gap-1.5 min-w-0">
                                             <p className="text-[10px] truncate font-medium opacity-70 flex-1">{p.last_message}</p>
@@ -358,7 +348,7 @@ function OrganizerMessagesContent() {
                                                             {msg.message}
                                                         </div>
                                                         <p className={`text-[8px] font-black px-1 ${isMe ? "text-right text-purple-400" : "text-left text-slate-300"}`}>
-                                                            {formatTime(msg.created_at)}
+                                                            {formatChatMessageTime(msg.created_at)}
                                                         </p>
                                                     </div>
                                                 </div>

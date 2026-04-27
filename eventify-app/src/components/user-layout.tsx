@@ -19,6 +19,7 @@ import {
   User,
   LogOut,
   Calculator,
+  Bot,
 } from "lucide-react"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
@@ -29,6 +30,7 @@ const navItems = [
   { href: "/my-events/budget", label: "Budget Planner", icon: Calculator },
   { href: "/my-events/payments", label: "Payments", icon: Wallet },
   { href: "/my-events/messages", label: "Messages", icon: MessageSquare },
+  { href: "/my-events/chat", label: "AI Chat", icon: Bot },
   { href: "/my-profile", label: "Profile", icon: User, exact: true },
 ]
 
@@ -57,6 +59,9 @@ export function UserLayout({ children }: { children: React.ReactNode }) {
     }
     if (item.label === "Create Event") {
       return pathname.startsWith("/my-events/event-details")
+    }
+    if (item.label === "AI Chat") {
+      return pathname === "/my-events/chat" || pathname.startsWith("/my-events/chat/")
     }
     if (item.exact) return pathname === item.href
     return pathname === item.href || pathname.startsWith(item.href + "/")

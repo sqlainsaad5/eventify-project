@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/dialog"
 import {
   Calendar,
-  DollarSign,
   CheckCircle,
   Loader2,
   MapPin,
@@ -29,6 +28,7 @@ import {
   Handshake,
 } from "lucide-react"
 import { toast } from "sonner"
+import { formatChatMessageTime } from "@/lib/format-chat-time"
 import {
   seedVendorBookingBaseline,
   isVendorBookingUnseen,
@@ -488,8 +488,7 @@ export default function VendorBookingsPage() {
                           {event.venue}
                         </p>
                         <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                          <DollarSign className="h-3 w-3 text-slate-400" />
-                          Budget: Rs. {event.budget?.toLocaleString()}
+                          Budget: Rs {event.budget?.toLocaleString()}
                         </p>
                       </button>
 
@@ -609,8 +608,7 @@ export default function VendorBookingsPage() {
                             {event.venue}
                           </p>
                           <p className="text-xs font-semibold text-emerald-600 flex items-center gap-1.5">
-                            <DollarSign className="h-3 w-3" />
-                            Estimated Payment: Rs. {paymentAmount.toLocaleString()}
+                            Estimated Payment: Rs {paymentAmount.toLocaleString()}
                           </p>
                           {event.verified && !event.payment_request_status && (
                             <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
@@ -635,7 +633,7 @@ export default function VendorBookingsPage() {
                           {processing === event.id ? (
                             <Loader2 className="h-4 w-4 animate-spin mr-1" />
                           ) : (
-                            <DollarSign className="h-4 w-4 mr-1" />
+                            <span className="text-sm font-bold mr-1">Rs</span>
                           )}
                           {event.payment_request_status === "paid"
                             ? "Paid"
@@ -737,7 +735,7 @@ export default function VendorBookingsPage() {
                   >
                     <p>{msg.message}</p>
                     <p className={`text-[10px] mt-1 ${msg.sender_id === vendorId ? "text-purple-200" : "text-slate-400"}`}>
-                      {msg.timestamp}
+                      {formatChatMessageTime(msg.created_at)}
                     </p>
                   </div>
                 </div>

@@ -24,7 +24,6 @@ import {
   ToggleRight,
   Loader2,
   Package,
-  DollarSign,
   Tag,
   MapPin,
 } from "lucide-react"
@@ -311,8 +310,7 @@ export default function VendorServicesPage() {
                       </p>
                     )}
                     <p className="text-xs font-semibold text-purple-600 flex items-center gap-1">
-                      <DollarSign className="h-3 w-3" />
-                      Base Price: Rs. {service.basePrice?.toLocaleString()}
+                      Base Price: Rs {service.basePrice?.toLocaleString()}
                     </p>
                   </div>
 
@@ -331,8 +329,7 @@ export default function VendorServicesPage() {
                           >
                             <span className="text-xs font-medium text-slate-700">{pkg.packageName}</span>
                             <span className="text-xs font-bold text-purple-600 flex items-center">
-                              <DollarSign className="h-3 w-3" />
-                              Rs. {pkg.price?.toLocaleString()}
+                              Rs {pkg.price?.toLocaleString()}
                             </span>
                           </div>
                         ))}
@@ -459,9 +456,9 @@ export default function VendorServicesPage() {
             {/* Base Price + Location */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-sm font-semibold text-slate-700">Base Price ($) *</Label>
+                <Label className="text-sm font-semibold text-slate-700">Base Price (Rs) *</Label>
                 <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">Rs</span>
                   <Input
                     type="number"
                     placeholder="0"
@@ -537,7 +534,7 @@ export default function VendorServicesPage() {
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <div className="relative">
-                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 pointer-events-none">Rs</span>
                         <Input
                           type="number"
                           placeholder="Price"

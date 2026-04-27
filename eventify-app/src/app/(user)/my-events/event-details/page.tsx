@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,7 +19,6 @@ import {
     ArrowRight,
     Calendar,
     MapPin,
-    DollarSign,
     Users,
     Image as ImageIcon,
     Target,
@@ -42,6 +41,7 @@ import {
 import { OrganizerProfileSheet } from "../_components/organizer-profile-sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { getMinSelectableEventDateString } from "@/lib/min-event-date"
 import {
     availabilityBadgeClass,
     availabilityLabel,
@@ -52,9 +52,22 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
+const EVENT_CATEGORIES = ["Wedding", "Conference", "Corporate", "Workshop", "Birthday", "Concert", "Other"] as const
+
+function resolveImageUrl(url: string | null | undefined): string | null {
+    if (!url) return null
+    if (url.startsWith("http://") || url.startsWith("https://")) return url
+    const base = API_BASE.replace(/\/$/, "")
+    return url.startsWith("/") ? `${base}${url}` : `${base}/${url}`
+}
+
 export default function EventDetailsPage() {
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const eventIdParam = searchParams.get("eventId")
     const [loading, setLoading] = useState(false)
+    const [loadingEvent, setLoadingEvent] = useState(!!eventIdParam)
+    const [editingEventId, setEditingEventId] = useState<number | null>(null)
     const [submitted, setSubmitted] = useState(false)
     const [user, setUser] = useState<any>(null)
 
@@ -140,6 +153,88 @@ export default function EventDetailsPage() {
     }, [])
 
     useEffect(() => {
+        if (!eventIdParam) {
+            setLoadingEvent(false)
+            return
+        }
+        const id = parseInt(eventIdParam, 10)
+        if (!Number.isFinite(id) || id <= 0) {
+            toast.error("Invalid event link")
+            setLoadingEvent(false)
+            router.replace("/my-events")
+            return
+        }
+        let cancelled = false
+        const load = async () => {
+            setLoadingEvent(true)
+            const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
+            if (!token) {
+                if (!cancelled) {
+                    toast.error("You must be logged in")
+                    router.replace("/my-events")
+                    setLoadingEvent(false)
+                }
+                return
+            }
+            try {
+                const res = await fetch(`${API_BASE}/api/events`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                })
+                if (!res.ok) {
+                    if (!cancelled) {
+                        toast.error("Failed to load event")
+                        router.replace("/my-events")
+                    }
+                    return
+                }
+                const data = await res.json()
+                const list = Array.isArray(data?.created) ? data.created : []
+                const event = list.find((e: { id: number }) => e.id === id)
+                if (cancelled) return
+                if (!event) {
+                    toast.error("Event not found")
+                    router.replace("/my-events")
+                    return
+                }
+                if (event.status !== "created" || event.organizer_status !== "rejected") {
+                    toast.error("This event is not available for reassignment from here.")
+                    router.replace("/my-events")
+                    return
+                }
+                const dateStr = String(event.date ?? "")
+                    .slice(0, 10)
+                const vcat = String(event.vendor_category ?? "Wedding")
+                const category = (EVENT_CATEGORIES as readonly string[]).includes(vcat) ? vcat : "Wedding"
+                setFormData({
+                    name: event.name ?? "",
+                    date: dateStr,
+                    venue: event.venue ?? "",
+                    budget: String(event.budget != null ? event.budget : ""),
+                    vendor_category: category,
+                    guest_count: "",
+                    description: "",
+                })
+                setSelectedOrgId(null)
+                setPostForApplications(false)
+                setSelectedFile(null)
+                setPreviewUrl(resolveImageUrl(event.image_url) ?? null)
+                setEditingEventId(id)
+            } catch {
+                if (!cancelled) {
+                    toast.error("Failed to load event")
+                    router.replace("/my-events")
+                }
+            } finally {
+                if (!cancelled) setLoadingEvent(false)
+            }
+        }
+        void load()
+        return () => {
+            cancelled = true
+        }
+    }, [eventIdParam, router])
+
+    useEffect(() => {
         if (!organizers.length) return
         loadOrganizerSummaries(organizers)
         const t = setInterval(() => loadOrganizerSummaries(organizers), 30000)
@@ -163,9 +258,12 @@ export default function EventDetailsPage() {
         }
     }
 
-    const getCurrentDate = () => new Date().toISOString().split("T")[0]
-
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (editingEventId != null) {
+            toast.info("The existing event image is kept. Image changes are not part of reassignment yet.")
+            e.target.value = ""
+            return
+        }
         const file = e.target.files?.[0]
         if (file) {
             setSelectedFile(file)
@@ -223,6 +321,8 @@ export default function EventDetailsPage() {
         }
     }, [])
 
+    const isReassignMode = editingEventId != null
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setLoading(true)
@@ -231,6 +331,75 @@ export default function EventDetailsPage() {
         if (!token) {
             toast.error("You must be logged in to save event details")
             setLoading(false)
+            return
+        }
+
+        if (isReassignMode && editingEventId != null) {
+            if (postForApplications) {
+                toast.error("Reassignment requires choosing a new organizer. Post-for-applications is not available in this view.")
+                setLoading(false)
+                return
+            }
+            if (!selectedOrgId) {
+                toast.error("Please select a new organizer to send the assignment to.")
+                setLoading(false)
+                return
+            }
+            try {
+                const budgetNum = parseFloat(formData.budget)
+                if (!Number.isFinite(budgetNum) || budgetNum <= 0) {
+                    toast.error("Please enter a valid budget.")
+                    setLoading(false)
+                    return
+                }
+                const putRes = await fetch(`${API_BASE}/api/events/${editingEventId}`, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        name: formData.name.trim(),
+                        date: formData.date,
+                        venue: formData.venue.trim(),
+                        vendor_category: formData.vendor_category,
+                        budget: budgetNum,
+                    }),
+                })
+                if (!putRes.ok) {
+                    const err = await putRes.json().catch(() => ({}))
+                    toast.error(err.error || "Failed to update event details")
+                    setLoading(false)
+                    return
+                }
+                const reRes = await fetch(
+                    `${API_BASE}/api/events/${editingEventId}/reassign-organizer`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ organizer_id: selectedOrgId }),
+                    }
+                )
+                if (!reRes.ok) {
+                    const err = await reRes.json().catch(() => ({}))
+                    toast.error(err.error || "Failed to assign the new organizer")
+                    setLoading(false)
+                    return
+                }
+                toast.success("Event updated and new organizer assigned!")
+                setSubmitted(true)
+                setTimeout(() => {
+                    router.push("/my-events")
+                }, 4000)
+            } catch (err) {
+                console.error("Submit (reassign) error:", err)
+                toast.error("Internal server error. Please try again.")
+            } finally {
+                setLoading(false)
+            }
             return
         }
 
@@ -256,9 +425,9 @@ export default function EventDetailsPage() {
             const response = await fetch(`${API_BASE}/api/events`, {
                 method: "POST",
                 headers: {
-                    "Authorization": `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
-                body: formDataToSend
+                body: formDataToSend,
             })
 
             if (response.ok) {
@@ -277,6 +446,15 @@ export default function EventDetailsPage() {
         } finally {
             setLoading(false)
         }
+    }
+
+    if (loadingEvent) {
+        return (
+            <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 font-sans">
+                <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
+                <p className="text-sm font-bold text-slate-500">Loading your event…</p>
+            </div>
+        )
     }
 
     // ─── Success Screen ─────────────────────────────────────────────────────────
@@ -325,13 +503,16 @@ export default function EventDetailsPage() {
 
                 <div className="relative z-10">
                     <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-white/15 border border-white/20 text-xs font-black uppercase tracking-widest mb-6">
-                        <Sparkles className="h-4 w-4 animate-pulse" /> Create Event
+                        <Sparkles className="h-4 w-4 animate-pulse" />
+                        {isReassignMode ? "Reassign event" : "Create Event"}
                     </div>
                     <h1 className="text-4xl md:text-6xl font-black tracking-tighter mb-4">
-                        Your Vision, Our Expertise.
+                        {isReassignMode ? "Pick a new professional." : "Your Vision, Our Expertise."}
                     </h1>
                     <p className="text-lg text-white/70 font-medium max-w-xl mx-auto">
-                        Provide your event details below. We'll store them safely and help you bring your vision to life.
+                        {isReassignMode
+                            ? "Your event details are loaded. Choose another organizer to send a new assignment request."
+                            : "Provide your event details below. We'll store them safely and help you bring your vision to life."}
                     </p>
                 </div>
             </div>
@@ -364,8 +545,19 @@ export default function EventDetailsPage() {
                                 )}
                             </div>
                             <div className="p-8 space-y-6">
+                                {isReassignMode && (
+                                    <p className="text-sm text-amber-900/90 font-medium leading-relaxed bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+                                        A previous expert declined. Choose a new organizer below. Open applications are
+                                        not available in this view.
+                                    </p>
+                                )}
                                 <div className="flex flex-wrap gap-4">
-                                    <label className="flex items-center gap-3 cursor-pointer">
+                                    <label
+                                        className={cn(
+                                            "flex items-center gap-3",
+                                            isReassignMode ? "cursor-default" : "cursor-pointer"
+                                        )}
+                                    >
                                         <input
                                             type="radio"
                                             name="organizerChoice"
@@ -375,12 +567,20 @@ export default function EventDetailsPage() {
                                         />
                                         <span className="text-sm font-bold text-slate-700">Select an organizer now</span>
                                     </label>
-                                    <label className="flex items-center gap-3 cursor-pointer">
+                                    <label
+                                        className={cn(
+                                            "flex items-center gap-3",
+                                            isReassignMode ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                                        )}
+                                    >
                                         <input
                                             type="radio"
                                             name="organizerChoice"
                                             checked={postForApplications}
-                                            onChange={() => setPostForApplications(true)}
+                                            onChange={() => {
+                                                if (!isReassignMode) setPostForApplications(true)
+                                            }}
+                                            disabled={isReassignMode}
                                             className="h-4 w-4 text-indigo-600 border-slate-300 focus:ring-indigo-500"
                                         />
                                         <span className="text-sm font-bold text-slate-700">Post for organizers to apply</span>
@@ -755,7 +955,7 @@ export default function EventDetailsPage() {
                                                 id="date"
                                                 required
                                                 type="date"
-                                                min={getCurrentDate()}
+                                                min={getMinSelectableEventDateString()}
                                                 className="h-14 pl-12 bg-slate-50 border-none rounded-2xl font-black focus-visible:ring-2 focus-visible:ring-indigo-500/30"
                                                 value={formData.date}
                                                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
@@ -764,10 +964,10 @@ export default function EventDetailsPage() {
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="budget" className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                            Total Budget ($) *
+                                            Total Budget (Rs) *
                                         </Label>
                                         <div className="relative group">
-                                            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 group-focus-within:text-indigo-600 pointer-events-none">Rs</span>
                                             <Input
                                                 id="budget"
                                                 required
@@ -857,7 +1057,7 @@ export default function EventDetailsPage() {
                                             <SelectValue placeholder="Select category" />
                                         </SelectTrigger>
                                         <SelectContent className="rounded-2xl border-slate-100 shadow-xl">
-                                            {["Wedding", "Conference", "Corporate", "Workshop", "Birthday", "Concert", "Other"].map((cat) => (
+                                            {EVENT_CATEGORIES.map((cat) => (
                                                 <SelectItem key={cat} value={cat} className="rounded-xl py-3 font-bold">
                                                     {cat}
                                                 </SelectItem>
@@ -901,15 +1101,39 @@ export default function EventDetailsPage() {
                             </div>
                             <div className="p-6">
                                 <div
-                                    className={`relative h-60 rounded-[32px] border-4 border-dashed transition-all duration-300 flex flex-col items-center justify-center overflow-hidden cursor-pointer ${previewUrl ? "border-indigo-200 bg-indigo-50/10" : "border-slate-100 hover:border-indigo-200 bg-slate-50"
-                                        }`}
-                                    onClick={() => document.getElementById("cover-image-upload")?.click()}
+                                    className={cn(
+                                        "relative h-60 rounded-[32px] border-4 border-dashed transition-all duration-300 flex flex-col items-center justify-center overflow-hidden",
+                                        isReassignMode
+                                            ? previewUrl
+                                                ? "cursor-default border-indigo-200 bg-indigo-50/10"
+                                                : "cursor-default border-slate-100 bg-slate-50"
+                                            : cn(
+                                                  "cursor-pointer",
+                                                  previewUrl
+                                                      ? "border-indigo-200 bg-indigo-50/10"
+                                                      : "border-slate-100 hover:border-indigo-200 bg-slate-50"
+                                              )
+                                    )}
+                                    onClick={() => {
+                                        if (isReassignMode) {
+                                            toast.info("The current event image is kept for this reassignment.")
+                                        } else {
+                                            document.getElementById("cover-image-upload")?.click()
+                                        }
+                                    }}
                                 >
                                     {previewUrl ? (
                                         <>
                                             <img src={previewUrl} alt="Preview" className="absolute inset-0 w-full h-full object-cover" />
-                                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                                                <span className="text-white text-[10px] font-black uppercase tracking-widest bg-white/20 px-4 py-2 rounded-full backdrop-blur-md">Change Vision</span>
+                                            <div
+                                                className={cn(
+                                                    "absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity",
+                                                    isReassignMode ? "opacity-0" : "opacity-0 hover:opacity-100"
+                                                )}
+                                            >
+                                                <span className="text-white text-[10px] font-black uppercase tracking-widest bg-white/20 px-4 py-2 rounded-full backdrop-blur-md">
+                                                    {isReassignMode ? "Saved image" : "Change Vision"}
+                                                </span>
                                             </div>
                                         </>
                                     ) : (
@@ -945,7 +1169,13 @@ export default function EventDetailsPage() {
                                     <CalendarCheck className="h-8 w-8" />
                                 )}
                                 <span className="text-sm mt-1 uppercase tracking-widest font-black">
-                                    {loading ? "Recording Vision..." : "Save My Events"}
+                                    {loading
+                                        ? isReassignMode
+                                            ? "Sending assignment…"
+                                            : "Recording Vision..."
+                                        : isReassignMode
+                                          ? "Reassign & notify organizer"
+                                          : "Save My Events"}
                                 </span>
                             </div>
                         </Button>

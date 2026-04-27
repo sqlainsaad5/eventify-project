@@ -245,7 +245,7 @@ export default function AdminEventsPage() {
                             ? new Date(e.date).toLocaleDateString()
                             : "—"}
                         </TableCell>
-                        <TableCell>${Number(e.budget).toFixed(2)}</TableCell>
+                        <TableCell>Rs {Number(e.budget).toFixed(2)}</TableCell>
                         <TableCell>{e.organizer_name || "—"}</TableCell>
                         <TableCell>
                           <Badge

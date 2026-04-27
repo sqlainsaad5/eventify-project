@@ -529,7 +529,7 @@ def get_vendor_bookings(vendor_id):
                 "date": event.date,
                 "client": organizer.name if organizer else "Lead Organizer",
                 "status": "confirmed",
-                "budget": f"${event.budget}",
+                "budget": f"Rs {event.budget}",
                 "verified": verified,
                 "completed": is_completed,
                 "payment_request_status": payment_request_status,

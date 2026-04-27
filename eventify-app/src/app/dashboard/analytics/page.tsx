@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { BarChart3, TrendingUp, Users, DollarSign, CalendarDays, Loader2 } from "lucide-react"
+import { BarChart3, TrendingUp, Users, CalendarDays, Loader2 } from "lucide-react"
 import {
   Bar,
   BarChart,
@@ -108,7 +108,7 @@ export default function AnalyticsPage() {
 
         {/* Stats Overview */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          <StatMiniCard title="Managed Capital" value={`$${(totalRevenue / 1000).toFixed(1)}k`} icon={<DollarSign className="h-4 w-4" />} />
+          <StatMiniCard title="Managed Capital" value={`Rs ${(totalRevenue / 1000).toFixed(1)}k`} icon={<span className="text-xs font-bold flex items-center justify-center w-4 h-4">Rs</span>} />
           <StatMiniCard title="Active Reach" value={(events.length * 85).toLocaleString()} icon={<Users className="h-4 w-4" />} color="blue" />
           <StatMiniCard title="Efficiency" value="82.4%" icon={<TrendingUp className="h-4 w-4" />} color="emerald" />
           <StatMiniCard title="Completed" value={eventsCompleted.toString()} icon={<BarChart3 className="h-4 w-4" />} color="purple" />
@@ -195,7 +195,7 @@ export default function AnalyticsPage() {
             </CardContent>
           </Card>
 
-          <Card className="bg-slate-900 border-none text-white shadow-xl rounded-[32px] overflow-hidden">
+          {/* <Card className="bg-slate-900 border-none text-white shadow-xl rounded-[32px] overflow-hidden">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-white text-lg font-bold">
                 <TrendingUp className="h-5 w-5 text-emerald-400" /> Efficiency Insights
@@ -208,7 +208,7 @@ export default function AnalyticsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
                   <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Cost Saved</p>
-                  <p className="text-xl font-black text-emerald-400">$3,420</p>
+                  <p className="text-xl font-black text-emerald-400">Rs 3,420</p>
                 </div>
                 <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
                   <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Time Optimized</p>
@@ -216,7 +216,7 @@ export default function AnalyticsPage() {
                 </div>
               </div>
             </CardContent>
-          </Card>
+          </Card> */}
         </div>
       </div>
     </DashboardLayout>

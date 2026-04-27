@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models import ChatMessage, User, Event, db, vendor_events
+from app.utils.datetime_serialize import isoformat_utc_z
 from datetime import datetime
 from sqlalchemy import or_, and_
 import os
@@ -185,7 +186,7 @@ def get_vendor_conversations():
                 "organizer_name": organizer.name,
                 "organizer_email": organizer.email,
                 "last_message": last_message.message if last_message else "No messages yet",
-                "last_message_time": last_message.created_at.isoformat() if last_message else None,
+                "last_message_time": isoformat_utc_z(last_message.created_at) if last_message else None,
                 "unread_count": unread_count
             })
         
@@ -230,7 +231,7 @@ def get_organizer_all_conversations():
                     "partner_email": client.email,
                     "partner_role": "user", # Client
                     "last_message": last_msg.message if last_msg else "No messages yet",
-                    "last_message_time": last_msg.created_at.isoformat() if last_msg else None,
+                    "last_message_time": isoformat_utc_z(last_msg.created_at) if last_msg else None,
                     "unread_count": unread
                 })
 
@@ -276,7 +277,7 @@ def get_organizer_all_conversations():
                     "partner_email": vendor.email,
                     "partner_role": "vendor",
                     "last_message": last_msg.message if last_msg else "No messages yet",
-                    "last_message_time": last_msg.created_at.isoformat() if last_msg else None,
+                    "last_message_time": isoformat_utc_z(last_msg.created_at) if last_msg else None,
                     "unread_count": unread
                 })
 
@@ -325,7 +326,7 @@ def get_user_conversations():
                 "partner_email": organizer.email,
                 "partner_role": "organizer",
                 "last_message": last_message.message if last_message else "No messages yet",
-                "last_message_time": last_message.created_at.isoformat() if last_message else None,
+                "last_message_time": isoformat_utc_z(last_message.created_at) if last_message else None,
                 "unread_count": unread_count
             })
             

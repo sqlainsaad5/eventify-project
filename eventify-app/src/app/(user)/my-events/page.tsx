@@ -181,8 +181,10 @@ function MyEventsPageContent() {
                 applications={dash.applications}
                 loadingApplications={dash.loadingApplications}
                 assigningOrganizerId={dash.assigningOrganizerId}
+                decliningOrganizerId={dash.decliningOrganizerId}
                 applicationOrganizerSummaries={dash.applicationOrganizerSummaries}
                 onAssign={dash.handleAssignOrganizer}
+                onDecline={dash.handleDeclineApplication}
                 reviewDialog={dash.reviewDialog}
                 setReviewDialog={dash.setReviewDialog}
                 onSubmitReview={dash.submitReview}

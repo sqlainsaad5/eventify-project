@@ -172,9 +172,9 @@ export default function VendorsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Price Range</SelectItem>
-                  <SelectItem value="0-100">$0 - $100</SelectItem>
-                  <SelectItem value="100-500">$100 - $500</SelectItem>
-                  <SelectItem value="500+">$500+</SelectItem>
+                  <SelectItem value="0-100">Rs 0 - Rs 100</SelectItem>
+                  <SelectItem value="100-500">Rs 100 - Rs 500</SelectItem>
+                  <SelectItem value="500+">Rs 500+</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -236,7 +236,7 @@ export default function VendorsPage() {
               <div className="p-4">
                 <h3 className="font-semibold text-gray-900 mb-1">{vendor.name}</h3>
                 <p className="text-sm text-gray-600 mb-3">
-                  Starting at <span className="text-green-600 font-semibold">${vendor.price}</span>
+                  Starting at <span className="text-green-600 font-semibold">Rs {vendor.price}</span>
                   {vendor.price < 100 ? "/person" : ""}
                 </p>
                 <div className="flex items-center gap-1">

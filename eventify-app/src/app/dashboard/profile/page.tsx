@@ -423,7 +423,7 @@ export default function OrganizerProfilePage() {
                       }
                       disabled={!isEditing}
                       className="bg-background min-h-[100px]"
-                      placeholder="e.g. Full planning from $2,500 — venue, catering coordination, day-of coordination."
+                      placeholder="e.g. Full planning from Rs 2,500 — venue, catering coordination, day-of coordination."
                       maxLength={2000}
                     />
                     <p className="text-xs text-muted-foreground">
@@ -452,7 +452,7 @@ export default function OrganizerProfilePage() {
                 <p className="text-sm text-muted-foreground mt-1">Vendors Connected</p>
               </div>
               <div className="text-center p-4 bg-muted/50 rounded-lg">
-                <p className="text-2xl font-bold text-card-foreground">$0</p>
+                <p className="text-2xl font-bold text-card-foreground">Rs 0</p>
                 <p className="text-sm text-muted-foreground mt-1">Total Budget Managed</p>
               </div>
             </div>

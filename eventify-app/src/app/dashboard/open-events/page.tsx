@@ -8,12 +8,13 @@ import { Badge } from "@/components/ui/badge"
 import {
   Calendar,
   MapPin,
-  DollarSign,
   Briefcase,
   Loader2,
   Send,
 } from "lucide-react"
 import { toast } from "sonner"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 interface OpenEvent {
   id: number
@@ -24,6 +25,8 @@ interface OpenEvent {
   vendor_category: string
   image_url?: string
   status?: string
+  /** From GET /api/events/open: "declined" if host declined a previous application; organizer may re-apply. */
+  my_application_status?: string | null
 }
 
 export default function OpenEventsPage() {
@@ -32,6 +35,9 @@ export default function OpenEventsPage() {
   const [applyingId, setApplyingId] = useState<number | null>(null)
   const [applyMessage, setApplyMessage] = useState("")
   const [applyModalEventId, setApplyModalEventId] = useState<number | null>(null)
+  const applyModalContext = applyModalEventId
+    ? events.find((e) => e.id === applyModalEventId) ?? null
+    : null
 
   useEffect(() => {
     fetchOpenEvents()
@@ -40,7 +46,7 @@ export default function OpenEventsPage() {
   useEffect(() => {
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     if (!token) return
-    fetch("http://localhost:5000/api/payments/notifications/mark-read-by-action", {
+    fetch(`${API_BASE}/api/payments/notifications/mark-read-by-action`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ action: "open_events" }),
@@ -53,7 +59,7 @@ export default function OpenEventsPage() {
     setLoading(true)
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
     try {
-      const res = await fetch("http://localhost:5000/api/events/open", {
+      const res = await fetch(`${API_BASE}/api/events/open`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.status === 403) {
@@ -86,7 +92,7 @@ export default function OpenEventsPage() {
     }
     setApplyingId(eventId)
     try {
-      const res = await fetch(`http://localhost:5000/api/events/${eventId}/apply`, {
+      const res = await fetch(`${API_BASE}/api/events/${eventId}/apply`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -173,15 +179,14 @@ export default function OpenEventsPage() {
                     <span className="truncate">{event.venue}</span>
                   </div>
                   <div className="flex items-center gap-2 text-slate-500 text-sm font-medium">
-                    <DollarSign className="h-4 w-4 text-indigo-500" />
-                    <span>Rs. {Number(event.budget).toLocaleString()} budget</span>
+                    <span>Rs {Number(event.budget).toLocaleString()} budget</span>
                   </div>
                   <Button
                     onClick={() => openApplyModal(event.id)}
                     className="w-full rounded-xl font-black text-[10px] uppercase tracking-widest bg-indigo-600 hover:bg-indigo-700"
                   >
                     <Send className="h-4 w-4 mr-2" />
-                    Apply
+                    {event.my_application_status === "declined" ? "Apply again" : "Apply"}
                   </Button>
                 </CardContent>
               </Card>
@@ -200,9 +205,17 @@ export default function OpenEventsPage() {
             className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-black text-slate-900">Apply to event</h3>
+            <h3 className="text-lg font-black text-slate-900">
+              {applyModalContext?.my_application_status === "declined" ? "Apply again" : "Apply to event"}
+            </h3>
             <p className="text-sm text-slate-500">
-              Optional: add a short message to the event owner.
+              {applyModalContext?.my_application_status === "declined" ? (
+                <>
+                  The host declined your last application. You can submit a new message with an updated application.
+                </>
+              ) : (
+                <>Optional: add a short message to the event owner.</>
+              )}
             </p>
             <textarea
               placeholder="e.g. I have experience with similar events..."

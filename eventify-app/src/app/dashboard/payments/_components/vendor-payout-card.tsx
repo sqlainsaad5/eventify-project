@@ -11,7 +11,6 @@ type Props = {
   formatCurrency: (n: number) => string
   getStatusBadge: (status: string) => ReactNode
   onApprove: (id: number) => void
-  onReject: (id: number) => void
   onAuthorize: (eventId: number, amount: number, requestId: number) => void
   processing: number | null
 }
@@ -21,7 +20,6 @@ export function VendorPayoutCard({
   formatCurrency,
   getStatusBadge,
   onApprove,
-  onReject,
   onAuthorize,
   processing,
 }: Props) {
@@ -44,23 +42,13 @@ export function VendorPayoutCard({
         </div>
         <div className="flex flex-wrap gap-2">
           {req.status === "pending" && (
-            <>
-              <Button
-                onClick={() => onApprove(req.id)}
-                size="sm"
-                className="h-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white border-emerald-100 border transition-all font-black text-[10px] uppercase"
-              >
-                Approve
-              </Button>
-              <Button
-                onClick={() => onReject(req.id)}
-                size="sm"
-                variant="ghost"
-                className="h-10 rounded-xl text-red-500 font-black text-[10px] uppercase"
-              >
-                Reject
-              </Button>
-            </>
+            <Button
+              onClick={() => onApprove(req.id)}
+              size="sm"
+              className="h-10 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white border-emerald-100 border transition-all font-black text-[10px] uppercase"
+            >
+              Approve
+            </Button>
           )}
           {req.status === "approved" && (
             <Button

@@ -16,7 +16,7 @@ import {
   Cell,
 } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
-import { TrendingUp, Users, DollarSign } from "lucide-react"
+import { TrendingUp, Users } from "lucide-react"
 
 const revenueByMonth = [
   { month: "Jan", revenue: 32000 },
@@ -60,10 +60,10 @@ export default function AdminReportsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle>Total Revenue</CardTitle>
-              <DollarSign className="h-5 w-5 text-purple-600" />
+              <span className="text-sm font-bold text-purple-600">Rs</span>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">$248,000</div>
+              <div className="text-2xl font-bold">Rs 248,000</div>
               <p className="text-xs text-green-500 mt-1">+18% from last quarter</p>
             </CardContent>
           </Card>

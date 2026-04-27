@@ -24,6 +24,11 @@ type Props = {
     onPrimary: () => void
     primaryDisabled?: boolean
     primaryLoading?: boolean
+    /** Optional e.g. Decline application */
+    secondaryLabel?: string
+    onSecondary?: () => void
+    secondaryLoading?: boolean
+    secondaryDisabled?: boolean
     contentClassName?: string
 }
 
@@ -36,6 +41,10 @@ export function OrganizerProfileSheet({
     onPrimary,
     primaryDisabled,
     primaryLoading,
+    secondaryLabel,
+    onSecondary,
+    secondaryLoading,
+    secondaryDisabled,
     contentClassName,
 }: Props) {
     if (!org) return null
@@ -126,6 +135,24 @@ export function OrganizerProfileSheet({
                                 primaryLabel
                             )}
                         </Button>
+                        {secondaryLabel && onSecondary && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="rounded-xl font-black uppercase tracking-widest text-[10px] border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={!!secondaryDisabled}
+                                onClick={onSecondary}
+                            >
+                                {secondaryLoading ? (
+                                    <span className="inline-flex items-center gap-2">
+                                        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                        Please wait…
+                                    </span>
+                                ) : (
+                                    secondaryLabel
+                                )}
+                            </Button>
+                        )}
                         {!canSelect && (
                             <p className="text-xs text-rose-600 font-bold text-center">
                                 Not accepting new events — choose another organizer.
