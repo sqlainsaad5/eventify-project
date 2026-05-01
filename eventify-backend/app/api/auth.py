@@ -125,8 +125,12 @@ def google_callback():
             db.session.add(user)
             db.session.commit()
 
-        # Create JWT token
-        token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
+        # Create JWT token (role in claims for edge/middleware verification)
+        token = create_access_token(
+            identity=str(user.id),
+            expires_delta=timedelta(days=1),
+            additional_claims={"role": user.role},
+        )
         
         # Redirect with encoded parameters
         params = {
@@ -432,7 +436,11 @@ def login():
         if not getattr(user, "is_active", True):
             return jsonify({"error": "Account is disabled. Contact support."}), 403
 
-        token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
+        token = create_access_token(
+            identity=str(user.id),
+            expires_delta=timedelta(days=1),
+            additional_claims={"role": user.role},
+        )
 
         return jsonify({
             "message": "Login successful",
@@ -456,7 +464,11 @@ def login():
     if not user.is_verified:
         return jsonify({"error": "Please verify your email before logging in."}), 403
 
-    token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))
+    token = create_access_token(
+        identity=str(user.id),
+        expires_delta=timedelta(days=1),
+        additional_claims={"role": user.role},
+    )
 
     return jsonify({
         "message": "Login successful",

@@ -5,23 +5,8 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
-import {
-  Calendar,
-  MapPin,
-  MoreVertical,
-  Trash2,
-  Edit,
-  ExternalLink,
-  MessageSquare,
-  Loader2,
-} from "lucide-react"
+import { Calendar, MapPin, MessageSquare, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import type { DashboardEvent } from "../_lib/types"
 
@@ -32,7 +17,6 @@ type Props = {
   activeTab: "personal" | "assigned"
   getUserId: () => number | null
   organizerRequests: { event_id: number; status: string }[]
-  onDelete: (id: number) => void
   onAssignmentResponse: (id: number, status: "accepted" | "rejected") => void
   onRefetch: () => void
   apiBase: string
@@ -49,7 +33,6 @@ export function DashboardEventGridCard({
   activeTab,
   getUserId,
   organizerRequests,
-  onDelete,
   onAssignmentResponse,
   onRefetch,
   apiBase,
@@ -122,40 +105,14 @@ export function DashboardEventGridCard({
         </div>
       </div>
       <CardContent className="p-6">
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex-1 min-w-0">
-            <h3 className="text-xl font-bold text-slate-900 truncate group-hover:text-purple-600 transition-colors">
-              {event.name}
-            </h3>
-            <div className="flex items-center gap-2 text-slate-500 mt-2 text-sm font-medium">
-              <MapPin className="h-3.5 w-3.5 text-purple-500" />
-              <span className="truncate">{event.venue}</span>
-            </div>
+        <div className="mb-4 min-w-0">
+          <h3 className="text-xl font-bold text-slate-900 truncate group-hover:text-purple-600 transition-colors">
+            {event.name}
+          </h3>
+          <div className="flex items-center gap-2 text-slate-500 mt-2 text-sm font-medium">
+            <MapPin className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+            <span className="truncate">{event.venue}</span>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-slate-100">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48 rounded-2xl p-2 shadow-xl border-slate-100">
-              <DropdownMenuItem className="rounded-xl p-2.5 cursor-pointer">
-                <Edit className="h-4 w-4 mr-2" />
-                Edit Details
-              </DropdownMenuItem>
-              <DropdownMenuItem className="rounded-xl p-2.5 cursor-pointer">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                View Dashboard
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => onDelete(event.id)}
-                className="rounded-xl p-2.5 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete Event
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
 
         <div className="space-y-4">

@@ -1,13 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -34,19 +28,20 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import { useDebounce } from "@/hooks/use-debounce";
 import { toast } from "sonner";
-import { Search, Calendar } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
 
-interface Organizer {
+interface ChatRow {
   id: number;
-  name: string | null;
-  email: string;
-  role: string;
-  events_total?: number;
-  events_pending?: number;
-  created_at?: string | null;
+  sender_id: number;
+  sender_name: string;
+  receiver_id: number;
+  receiver_name: string;
+  event_id: number;
+  event_name: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
 }
 
 function getToken(): string | null {
@@ -54,16 +49,17 @@ function getToken(): string | null {
   return localStorage.getItem("token")?.replace(/['"]+/g, "").trim() ?? null;
 }
 
-export default function AdminOrganizersPage() {
-  const [organizers, setOrganizers] = useState<Organizer[]>([]);
+export default function AdminMessagesPage() {
+  const [rows, setRows] = useState<ChatRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
   const [loading, setLoading] = useState(true);
-  const [searchInput, setSearchInput] = useState("");
-  const debouncedSearch = useDebounce(searchInput, 350);
+  const [eventIdInput, setEventIdInput] = useState("");
+  const [eventId, setEventId] = useState<number | null>(null);
+  const [days, setDays] = useState<number>(30);
 
-  const fetchOrganizers = useCallback(async () => {
+  const fetchMessages = useCallback(async () => {
     const token = getToken();
     if (!token) {
       setLoading(false);
@@ -74,28 +70,45 @@ export default function AdminOrganizersPage() {
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("per_page", String(perPage));
-      if (debouncedSearch) params.set("q", debouncedSearch);
-      const res = await fetch(`${getApiBase()}/api/admin/organizers?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      if (eventId != null) params.set("event_id", String(eventId));
+      params.set("days", String(days));
+      const res = await fetch(
+        `${getApiBase()}/api/admin/chat-messages?${params}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err?.error || "Failed to load organizers");
+        toast.error("Failed to load messages");
         return;
       }
       const data = await res.json();
-      setOrganizers(data.organizers ?? []);
+      setRows(data.messages ?? []);
       setTotal(data.total ?? 0);
     } catch {
-      toast.error("Failed to load organizers");
+      toast.error("Failed to load messages");
     } finally {
       setLoading(false);
     }
-  }, [page, perPage, debouncedSearch]);
+  }, [page, perPage, eventId, days]);
 
   useEffect(() => {
-    fetchOrganizers();
-  }, [fetchOrganizers]);
+    fetchMessages();
+  }, [fetchMessages]);
+
+  const applyEventFilter = () => {
+    const v = eventIdInput.trim();
+    if (!v) {
+      setEventId(null);
+      setPage(1);
+      return;
+    }
+    const n = parseInt(v, 10);
+    if (Number.isNaN(n)) {
+      toast.error("Event ID must be a number");
+      return;
+    }
+    setEventId(n);
+    setPage(1);
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / perPage));
 
@@ -103,25 +116,52 @@ export default function AdminOrganizersPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          Organizers
+          Messages
         </h1>
-        <CardDescription>
-          List of organizers and their event counts. Approve or reject events from the Events page.
-        </CardDescription>
+        <p className="text-muted-foreground text-sm">
+          In-app chat between users (moderation / support). Respects the same
+          retention as your database.
+        </p>
       </div>
 
-      <Card className="rounded-2xl border-border">
-        <CardHeader className="pb-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Card>
+        <CardContent className="flex flex-wrap items-end gap-4 pt-6">
+          <div className="space-y-2">
+            <label className="text-sm text-muted-foreground">Event ID</label>
+            <div className="flex gap-2">
               <Input
-                placeholder="Search by name or email..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-9"
+                placeholder="Optional"
+                value={eventIdInput}
+                onChange={(e) => setEventIdInput(e.target.value)}
+                className="w-32"
               />
+              <Button type="button" variant="secondary" onClick={applyEventFilter}>
+                Apply
+              </Button>
             </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-muted-foreground">Last N days</label>
+            <Select
+              value={String(days)}
+              onValueChange={(v) => {
+                setDays(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">7</SelectItem>
+                <SelectItem value="30">30</SelectItem>
+                <SelectItem value="90">90</SelectItem>
+                <SelectItem value="365">365</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-muted-foreground">Per page</label>
             <Select
               value={String(perPage)}
               onValueChange={(v) => {
@@ -139,8 +179,11 @@ export default function AdminOrganizersPage() {
               </SelectContent>
             </Select>
           </div>
-        </CardHeader>
-        <CardContent>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6">
           {loading ? (
             <div className="space-y-2">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -152,46 +195,38 @@ export default function AdminOrganizersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Events</TableHead>
-                    <TableHead>Pending</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead>Event</TableHead>
+                    <TableHead>From</TableHead>
+                    <TableHead>To</TableHead>
+                    <TableHead>Message</TableHead>
+                    <TableHead>Read</TableHead>
+                    <TableHead>Time</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {organizers.length === 0 ? (
+                  {rows.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={5}
+                        colSpan={6}
                         className="h-24 text-center text-muted-foreground"
                       >
-                        No organizers found.
+                        No messages found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    organizers.map((o) => (
-                      <TableRow key={o.id}>
-                        <TableCell className="font-medium">
-                          {o.name || "—"}
+                    rows.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="max-w-[140px] truncate font-medium">
+                          {m.event_name}
                         </TableCell>
-                        <TableCell>{o.email}</TableCell>
-                        <TableCell>{o.events_total ?? 0}</TableCell>
-                        <TableCell>{o.events_pending ?? 0}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button variant="outline" size="sm" asChild>
-                              <Link href={`/admin/users/${o.id}`}>Profile</Link>
-                            </Button>
-                            <Button variant="outline" size="sm" asChild>
-                              <Link
-                                href={`/admin/events?organizer_id=${o.id}`}
-                              >
-                                <Calendar className="mr-1 size-4" />
-                                Events
-                              </Link>
-                            </Button>
-                          </div>
+                        <TableCell className="text-sm">{m.sender_name}</TableCell>
+                        <TableCell className="text-sm">{m.receiver_name}</TableCell>
+                        <TableCell className="max-w-md truncate text-sm text-muted-foreground">
+                          {m.message}
+                        </TableCell>
+                        <TableCell>{m.is_read ? "Yes" : "No"}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {m.created_at}
                         </TableCell>
                       </TableRow>
                     ))
@@ -212,7 +247,6 @@ export default function AdminOrganizersPage() {
                             e.preventDefault();
                             if (page > 1) setPage(page - 1);
                           }}
-                          aria-disabled={page <= 1}
                           className={
                             page <= 1 ? "pointer-events-none opacity-50" : ""
                           }
@@ -230,7 +264,6 @@ export default function AdminOrganizersPage() {
                             e.preventDefault();
                             if (page < totalPages) setPage(page + 1);
                           }}
-                          aria-disabled={page >= totalPages}
                           className={
                             page >= totalPages
                               ? "pointer-events-none opacity-50"

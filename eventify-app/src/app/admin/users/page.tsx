@@ -47,6 +47,8 @@ import {
 import { useDebounce } from "@/hooks/use-debounce";
 import { toast } from "sonner";
 import { Search, Download, Ban, CheckCircle, Pencil } from "lucide-react";
+import Link from "next/link";
+import { getApiBase } from "@/lib/api-base";
 
 interface AdminUser {
   id: number;
@@ -58,8 +60,6 @@ interface AdminUser {
   is_active?: boolean;
   created_at?: string | null;
 }
-
-const API_BASE = "http://localhost:5000";
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -96,7 +96,7 @@ export default function AdminUsersPage() {
       if (roleFilter !== "all") params.set("role", roleFilter);
       if (activeFilter === "active") params.set("is_active", "true");
       if (activeFilter === "blocked") params.set("is_active", "false");
-      const res = await fetch(`${API_BASE}/api/admin/users?${params}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -122,7 +122,7 @@ export default function AdminUsersPage() {
     const token = getToken();
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${user.id}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users/${user.id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -148,7 +148,7 @@ export default function AdminUsersPage() {
     const token = getToken();
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/bulk-status`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users/bulk-status`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -185,7 +185,7 @@ export default function AdminUsersPage() {
     if (!token) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${editUser.id}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users/${editUser.id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -218,7 +218,7 @@ export default function AdminUsersPage() {
     if (activeFilter === "active") params.set("is_active", "true");
     if (activeFilter === "blocked") params.set("is_active", "false");
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/export?${params}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users/export?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -417,6 +417,9 @@ export default function AdminUsersPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="sm" asChild>
+                              <Link href={`/admin/users/${u.id}`}>Profile</Link>
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"

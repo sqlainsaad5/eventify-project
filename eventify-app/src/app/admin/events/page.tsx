@@ -38,6 +38,7 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Search, CheckCircle, XCircle } from "lucide-react";
+import { getApiBase } from "@/lib/api-base";
 
 interface AdminEvent {
   id: number;
@@ -51,8 +52,6 @@ interface AdminEvent {
   organizer_status?: string | null;
   assigned_vendors?: string[];
 }
-
-const API_BASE = "http://localhost:5000";
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -94,7 +93,7 @@ export default function AdminEventsPage() {
       if (statusFilter !== "all") params.set("organizer_status", statusFilter);
       if (organizerId != null && !isNaN(organizerId))
         params.set("organizer_id", String(organizerId));
-      const res = await fetch(`${API_BASE}/api/admin/events?${params}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/events?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -126,7 +125,7 @@ export default function AdminEventsPage() {
     if (!token) return;
     setUpdatingId(eventId);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/events/${eventId}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/events/${eventId}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,

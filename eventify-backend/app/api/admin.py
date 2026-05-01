@@ -1,6 +1,17 @@
 from flask import Blueprint, jsonify, request, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import User, Event, Payment, PaymentRequest
+from app.models import (
+    User,
+    Event,
+    Payment,
+    PaymentRequest,
+    OrganizerPaymentRequest,
+    Review,
+    ChatMessage,
+    EventVendorAgreement,
+    BudgetPlanItem,
+)
+from app.models.models import vendor_events
 from app.extensions import db
 from sqlalchemy import or_, func
 from datetime import datetime, timedelta
@@ -47,6 +58,12 @@ def admin_overview():
     total_revenue = db.session.query(db.func.coalesce(db.func.sum(Payment.amount), 0)).scalar() or 0
     pending_vendor_requests = PaymentRequest.query.filter_by(status="pending").count()
 
+    opr_pending = OrganizerPaymentRequest.query.filter_by(status="pending").count()
+    opr_paid = OrganizerPaymentRequest.query.filter_by(status="paid").count()
+    opr_rejected = OrganizerPaymentRequest.query.filter_by(status="rejected").count()
+    vendor_settlement_count = Payment.query.filter(Payment.vendor_id.isnot(None)).count()
+    platform_or_host_count = Payment.query.filter(Payment.vendor_id.is_(None)).count()
+
     return jsonify(
         {
             "users": {
@@ -64,6 +81,13 @@ def admin_overview():
                 "total": total_payments,
                 "total_revenue": float(total_revenue),
                 "pending_requests": pending_vendor_requests,
+                "pending_organizer_requests": opr_pending,
+                "organizer_requests_paid": opr_paid,
+                "organizer_requests_rejected": opr_rejected,
+                "by_lane": {
+                    "vendor_settlement": vendor_settlement_count,
+                    "platform_or_host": platform_or_host_count,
+                },
             },
         }
     ), 200
@@ -108,6 +132,69 @@ def admin_users():
         "page": page,
         "per_page": per_page,
     }), 200
+
+
+@admin_bp.route("/users/<int:user_id>/summary", methods=["GET"])
+@jwt_required()
+def admin_user_summary(user_id):
+    """Aggregated profile, counts, and recent financial activity for a user."""
+    _, err = require_admin()
+    if err:
+        return err
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    events_created = Event.query.filter_by(user_id=user_id).count()
+    events_organized = Event.query.filter_by(organizer_id=user_id).count()
+    vendor_event_links = (
+        db.session.query(func.count(vendor_events.c.event_id))
+        .filter(vendor_events.c.vendor_id == user_id)
+        .scalar()
+        or 0
+    )
+
+    pay_q = (
+        Payment.query.join(Event, Payment.event_id == Event.id)
+        .filter(
+            or_(
+                Event.user_id == user_id,
+                Event.organizer_id == user_id,
+                Payment.vendor_id == user_id,
+            )
+        )
+        .order_by(Payment.created_at.desc())
+        .limit(15)
+    )
+    recent_payments = [_payment_admin_dict(p) for p in pay_q.all()]
+
+    opr_recent = (
+        OrganizerPaymentRequest.query.filter_by(organizer_id=user_id)
+        .order_by(OrganizerPaymentRequest.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    vpr_recent = (
+        PaymentRequest.query.filter_by(vendor_id=user_id)
+        .order_by(PaymentRequest.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    return jsonify(
+        {
+            "user": user.to_dict(),
+            "counts": {
+                "events_created": events_created,
+                "events_organized": events_organized,
+                "vendor_event_links": int(vendor_event_links),
+            },
+            "recent_payments": recent_payments,
+            "recent_organizer_payment_requests": [_organizer_payment_request_admin_dict(r) for r in opr_recent],
+            "recent_vendor_payment_requests": [r.to_dict() for r in vpr_recent],
+        }
+    ), 200
 
 
 @admin_bp.route("/users/<int:user_id>", methods=["PATCH"])
@@ -281,10 +368,31 @@ def admin_patch_event(event_id):
 # Payments: list (paginated, filter)
 # ---------------------------------------------------------------------------
 
+
+def _payment_admin_dict(p: Payment) -> dict:
+    """Payment row plus event host/organizer and settlement lane for admin UI."""
+    d = p.to_dict()
+    ev = p.event
+    if ev:
+        host = ev.creator
+        org = ev.organizer
+        d["host_id"] = ev.user_id
+        d["host_name"] = host.name if host else None
+        d["organizer_id"] = ev.organizer_id
+        d["organizer_name"] = org.name if org else None
+    else:
+        d["host_id"] = None
+        d["host_name"] = None
+        d["organizer_id"] = None
+        d["organizer_name"] = None
+    d["lane"] = "vendor_settlement" if p.vendor_id is not None else "platform_or_host"
+    return d
+
+
 @admin_bp.route("/payments", methods=["GET"])
 @jwt_required()
 def admin_payments():
-    """List payments with pagination and optional status filter."""
+    """List payments with pagination; filter by status, event_id, vendor_id, lane."""
     _, err = require_admin()
     if err:
         return err
@@ -292,16 +400,27 @@ def admin_payments():
     page = max(1, request.args.get("page", type=int) or 1)
     per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
     status = request.args.get("status")
+    event_id = request.args.get("event_id", type=int)
+    vendor_id = request.args.get("vendor_id", type=int)
+    lane = (request.args.get("lane") or "").strip().lower()
 
     query = Payment.query
     if status:
         query = query.filter_by(status=status)
+    if event_id is not None:
+        query = query.filter_by(event_id=event_id)
+    if vendor_id is not None:
+        query = query.filter_by(vendor_id=vendor_id)
+    if lane == "vendor_settlement":
+        query = query.filter(Payment.vendor_id.isnot(None))
+    elif lane == "platform_or_host":
+        query = query.filter(Payment.vendor_id.is_(None))
 
     total = query.count()
     payments = query.order_by(Payment.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
 
     return jsonify({
-        "payments": [p.to_dict() for p in payments],
+        "payments": [_payment_admin_dict(p) for p in payments],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -360,6 +479,119 @@ def admin_patch_payment_request(req_id):
 
 
 # ---------------------------------------------------------------------------
+# Organizer payment requests (host pays organizer; Stripe links payment_id)
+# ---------------------------------------------------------------------------
+
+
+def _organizer_payment_request_admin_dict(opr: OrganizerPaymentRequest) -> dict:
+    d = opr.to_dict()
+    ev = opr.event
+    if ev:
+        d["host_id"] = ev.user_id
+        host = ev.creator
+        d["host_name"] = host.name if host else None
+    else:
+        d["host_id"] = None
+        d["host_name"] = None
+    d["payment_id"] = opr.payment_id
+    return d
+
+
+@admin_bp.route("/organizer-payment-requests", methods=["GET"])
+@jwt_required()
+def admin_organizer_payment_requests():
+    """List organizer payment requests with pagination, status filter, search."""
+    _, err = require_admin()
+    if err:
+        return err
+
+    page = max(1, request.args.get("page", type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
+    status = request.args.get("status")
+    q = (request.args.get("q") or "").strip()
+
+    query = OrganizerPaymentRequest.query
+    if status:
+        query = query.filter_by(status=status)
+    if q:
+        like = f"%{q}%"
+        query = (
+            query.join(Event, OrganizerPaymentRequest.event_id == Event.id)
+            .join(User, OrganizerPaymentRequest.organizer_id == User.id)
+            .filter(
+                or_(
+                    Event.name.ilike(like),
+                    User.name.ilike(like),
+                    User.email.ilike(like),
+                )
+            )
+        )
+
+    total = query.with_entities(func.count(func.distinct(OrganizerPaymentRequest.id))).scalar() or 0
+    id_rows = (
+        query.with_entities(OrganizerPaymentRequest.id)
+        .distinct()
+        .order_by(OrganizerPaymentRequest.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    id_list = [row[0] for row in id_rows]
+    if not id_list:
+        return jsonify({"organizer_payment_requests": [], "total": total, "page": page, "per_page": per_page}), 200
+    rows = OrganizerPaymentRequest.query.filter(OrganizerPaymentRequest.id.in_(id_list)).all()
+    order_map = {i: n for n, i in enumerate(id_list)}
+    rows.sort(key=lambda r: order_map.get(r.id, 0))
+
+    return jsonify({
+        "organizer_payment_requests": [_organizer_payment_request_admin_dict(r) for r in rows],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }), 200
+
+
+@admin_bp.route("/organizer-payment-requests/<int:req_id>", methods=["PATCH"])
+@jwt_required()
+def admin_patch_organizer_payment_request(req_id):
+    """Reject a pending organizer request, or sync paid_at when Stripe already set payment_id."""
+    _, err = require_admin()
+    if err:
+        return err
+
+    opr = OrganizerPaymentRequest.query.get(req_id)
+    if not opr:
+        return jsonify({"error": "Organizer payment request not found"}), 404
+
+    data = request.get_json() or {}
+    if "status" not in data or data["status"] not in ("pending", "paid", "rejected"):
+        return jsonify({"error": "status must be one of: pending, paid, rejected"}), 400
+
+    new_status = data["status"]
+    if opr.status == "paid":
+        return jsonify({"error": "Paid organizer requests cannot be changed"}), 400
+    if new_status == "paid":
+        if not opr.payment_id:
+            return jsonify({
+                "error": "Cannot mark as paid without a linked Payment (payment_id). "
+                "Complete checkout via Stripe first.",
+            }), 400
+        opr.status = "paid"
+        if not opr.paid_at:
+            opr.paid_at = datetime.utcnow()
+    elif new_status == "rejected":
+        if opr.status != "pending":
+            return jsonify({"error": "Only pending requests can be rejected"}), 400
+        opr.status = "rejected"
+        opr.paid_at = None
+    elif new_status == "pending":
+        return jsonify({"error": "Reopening to pending is not supported"}), 400
+
+    db.session.commit()
+    return jsonify(_organizer_payment_request_admin_dict(opr)), 200
+
+
+# ---------------------------------------------------------------------------
 # Organizers: list with event counts
 # ---------------------------------------------------------------------------
 
@@ -395,6 +627,133 @@ def admin_organizers():
 
     return jsonify({
         "organizers": result,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Platform oversight (read-only)
+# ---------------------------------------------------------------------------
+
+
+def _review_admin_dict(r: Review) -> dict:
+    d = r.to_dict(include_author=True)
+    if r.event:
+        d["event_name"] = r.event.name
+    return d
+
+
+@admin_bp.route("/reviews", methods=["GET"])
+@jwt_required()
+def admin_reviews():
+    _, err = require_admin()
+    if err:
+        return err
+
+    page = max(1, request.args.get("page", type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
+    event_id = request.args.get("event_id", type=int)
+    review_type = request.args.get("review_type")
+    status = request.args.get("status")
+
+    query = Review.query
+    if event_id is not None:
+        query = query.filter_by(event_id=event_id)
+    if review_type:
+        query = query.filter_by(review_type=review_type)
+    if status:
+        query = query.filter_by(status=status)
+
+    total = query.count()
+    rows = query.order_by(Review.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        "reviews": [_review_admin_dict(r) for r in rows],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }), 200
+
+
+@admin_bp.route("/chat-messages", methods=["GET"])
+@jwt_required()
+def admin_chat_messages():
+    _, err = require_admin()
+    if err:
+        return err
+
+    page = max(1, request.args.get("page", type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
+    event_id = request.args.get("event_id", type=int)
+    days = request.args.get("days", type=int)
+
+    query = ChatMessage.query
+    if event_id is not None:
+        query = query.filter_by(event_id=event_id)
+    if days is not None and days > 0:
+        since = datetime.utcnow() - timedelta(days=min(days, 365))
+        query = query.filter(ChatMessage.created_at >= since)
+
+    total = query.count()
+    rows = query.order_by(ChatMessage.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        "messages": [m.to_dict() for m in rows],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }), 200
+
+
+@admin_bp.route("/vendor-agreements", methods=["GET"])
+@jwt_required()
+def admin_vendor_agreements():
+    _, err = require_admin()
+    if err:
+        return err
+
+    page = max(1, request.args.get("page", type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
+    event_id = request.args.get("event_id", type=int)
+
+    query = EventVendorAgreement.query
+    if event_id is not None:
+        query = query.filter_by(event_id=event_id)
+
+    total = query.count()
+    rows = query.order_by(EventVendorAgreement.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        "agreements": [a.to_dict() for a in rows],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }), 200
+
+
+@admin_bp.route("/budget-plan-items", methods=["GET"])
+@jwt_required()
+def admin_budget_plan_items():
+    _, err = require_admin()
+    if err:
+        return err
+
+    page = max(1, request.args.get("page", type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
+    event_id = request.args.get("event_id", type=int)
+
+    query = BudgetPlanItem.query
+    if event_id is not None:
+        query = query.filter_by(event_id=event_id)
+
+    total = query.count()
+    rows = (
+        query.order_by(BudgetPlanItem.event_id, BudgetPlanItem.sort_order, BudgetPlanItem.id)
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return jsonify({
+        "items": [i.to_dict() for i in rows],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -444,5 +803,5 @@ def admin_analytics():
         "signups_by_date": signups_by_date,
         "revenue_by_date": revenue_by_date,
         "recent_users": [u.to_dict() for u in recent_users],
-        "recent_payments": [p.to_dict() for p in recent_payments],
+        "recent_payments": [_payment_admin_dict(p) for p in recent_payments],
     }), 200

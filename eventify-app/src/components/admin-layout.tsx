@@ -39,11 +39,13 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const handleLogout = () => {
-  localStorage.removeItem("token")
-  localStorage.removeItem("user")
-  localStorage.removeItem("role")
-  router.push("/login") // ✅ correct redirect
-}
+    localStorage.removeItem("token")
+    localStorage.removeItem("user")
+    localStorage.removeItem("role")
+    document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+    document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+    router.push("/login")
+  }
 
 
   return (

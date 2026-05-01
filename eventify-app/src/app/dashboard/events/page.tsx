@@ -271,7 +271,6 @@ export default function AllEventsPage() {
   const gridCardProps = {
     getUserId,
     organizerRequests,
-    onDelete: handleDelete,
     onAssignmentResponse: handleAssignmentResponse,
     onRefetch: fetchEvents,
     apiBase: API_BASE,

@@ -159,25 +159,6 @@ function AssignedSubPageInner({ title, filter, emptyMessage, basePath, filterDes
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this event? This action cannot be undone.")) return
-    const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim()
-    try {
-      const res = await fetch(`${API_BASE}/api/events/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) {
-        toast.success("Event deleted successfully")
-        refetch()
-      } else {
-        toast.error("Failed to delete event")
-      }
-    } catch {
-      toast.error("Error deleting event")
-    }
-  }
-
   return (
     <div className="font-sans pb-12">
       <div className="border-b border-slate-200/80 bg-white/90 backdrop-blur-md">
@@ -234,7 +215,6 @@ function AssignedSubPageInner({ title, filter, emptyMessage, basePath, filterDes
                 activeTab="assigned"
                 getUserId={getUserId}
                 organizerRequests={organizerRequests}
-                onDelete={handleDelete}
                 onAssignmentResponse={handleAssignmentResponse}
                 onRefetch={refetch}
                 apiBase={API_BASE}

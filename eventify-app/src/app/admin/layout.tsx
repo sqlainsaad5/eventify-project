@@ -16,7 +16,14 @@ import {
   Moon,
   Sun,
   Zap,
+  LogOut,
+  Star,
+  MessageSquare,
+  ClipboardList,
+  FileText,
+  MessageCircleQuestion,
 } from "lucide-react";
+import { getApiBase } from "@/lib/api-base";
 import {
   Sidebar,
   SidebarContent,
@@ -31,7 +38,6 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,7 +47,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
@@ -51,6 +56,11 @@ const navItems = [
   { href: "/admin/events", label: "Events", icon: Calendar },
   { href: "/admin/payments", label: "Payments", icon: CreditCard },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/admin/reports", label: "Reports", icon: FileText },
+  { href: "/admin/feedback", label: "Feedback", icon: MessageCircleQuestion },
+  { href: "/admin/reviews", label: "Reviews", icon: Star },
+  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
+  { href: "/admin/agreements", label: "Agreements", icon: ClipboardList },
   { href: "/admin/profile", label: "Profile", icon: UserCircle },
 ];
 
@@ -65,7 +75,10 @@ export default function AdminLayout({
   const [mounted, setMounted] = useState(false);
   const [overview, setOverview] = useState<{
     events?: { pending_organizer?: number };
-    payments?: { pending_requests?: number };
+    payments?: {
+      pending_requests?: number;
+      pending_organizer_requests?: number;
+    };
   } | null>(null);
 
   useEffect(() => {
@@ -81,7 +94,7 @@ export default function AdminLayout({
     }
     const token = localStorage.getItem("token")?.replace(/['"]+/g, "").trim();
     if (!token) return;
-    fetch("http://localhost:5000/api/admin/overview", {
+    fetch(`${getApiBase()}/api/admin/overview`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.ok && r.json())
@@ -91,7 +104,20 @@ export default function AdminLayout({
 
   const pendingEvents = overview?.events?.pending_organizer ?? 0;
   const pendingRequests = overview?.payments?.pending_requests ?? 0;
-  const pendingTotal = pendingEvents + pendingRequests;
+  const pendingOrgRequests =
+    overview?.payments?.pending_organizer_requests ?? 0;
+  const pendingTotal = pendingEvents + pendingRequests + pendingOrgRequests;
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    localStorage.removeItem("role");
+    document.cookie =
+      "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    document.cookie =
+      "role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    router.push("/login");
+  };
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -175,6 +201,15 @@ export default function AdminLayout({
                 Admin
               </h1>
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-border text-muted-foreground hover:text-destructive"
+                  onClick={handleLogout}
+                >
+                  <LogOut className="size-4" />
+                  Logout
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -202,7 +237,15 @@ export default function AdminLayout({
                     {pendingRequests > 0 && (
                       <DropdownMenuItem asChild>
                         <Link href="/admin/payments?tab=requests">
-                          Pending payment requests ({pendingRequests})
+                          Pending vendor payment requests ({pendingRequests})
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                    {pendingOrgRequests > 0 && (
+                      <DropdownMenuItem asChild>
+                        <Link href="/admin/payments?tab=organizer-requests">
+                          Pending organizer payment requests (
+                          {pendingOrgRequests})
                         </Link>
                       </DropdownMenuItem>
                     )}

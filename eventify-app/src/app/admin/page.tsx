@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { getApiBase } from "@/lib/api-base";
 import {
   Card,
   CardContent,
@@ -50,6 +51,9 @@ interface OverviewData {
     total: number;
     total_revenue: number;
     pending_requests: number;
+    pending_organizer_requests?: number;
+    organizer_requests_paid?: number;
+    by_lane?: { vendor_settlement: number; platform_or_host: number };
   };
 }
 
@@ -57,7 +61,15 @@ interface AnalyticsData {
   signups_by_date: { date: string; count: number }[];
   revenue_by_date: { date: string; total: number }[];
   recent_users: { id: number; name: string; email: string; role: string; created_at: string | null }[];
-  recent_payments: { id: number; amount: number; created_at: string | null; event_name?: string }[];
+  recent_payments: {
+    id: number;
+    amount: number;
+    created_at: string | null;
+    event_name?: string;
+    lane?: string;
+    host_name?: string | null;
+    organizer_name?: string | null;
+  }[];
 }
 
 export default function AdminOverviewPage() {
@@ -80,8 +92,8 @@ export default function AdminOverviewPage() {
       try {
         const headers = { Authorization: `Bearer ${token}` };
         const [overviewRes, analyticsRes] = await Promise.all([
-          fetch("http://localhost:5000/api/admin/overview", { headers }),
-          fetch("http://localhost:5000/api/admin/analytics?days=30", {
+          fetch(`${getApiBase()}/api/admin/overview`, { headers }),
+          fetch(`${getApiBase()}/api/admin/analytics?days=30`, {
             headers,
           }),
         ]);
@@ -161,6 +173,14 @@ export default function AdminOverviewPage() {
               Payments
             </Link>
           </Button>
+          {(overview?.payments?.pending_organizer_requests ?? 0) > 0 && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/admin/payments?tab=organizer-requests">
+                <CreditCard className="mr-2 size-4" />
+                Organizer requests
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -217,8 +237,22 @@ export default function AdminOverviewPage() {
               Rs {(overview?.payments?.total_revenue ?? 0).toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
-              Total payments: {overview?.payments?.total ?? 0} · Pending
-              requests: {overview?.payments?.pending_requests ?? 0}
+              Total payments: {overview?.payments?.total ?? 0} · Vendor
+              requests (pending): {overview?.payments?.pending_requests ?? 0}
+              {(overview?.payments?.pending_organizer_requests ?? 0) > 0 && (
+                <>
+                  {" "}
+                  · Organizer requests (pending):{" "}
+                  {overview?.payments?.pending_organizer_requests}
+                </>
+              )}
+              {overview?.payments?.by_lane && (
+                <>
+                  {" "}
+                  · Lanes: vendor {overview.payments.by_lane.vendor_settlement},
+                  host/platform {overview.payments.by_lane.platform_or_host}
+                </>
+              )}
             </p>
           </CardContent>
         </Card>
@@ -382,6 +416,11 @@ export default function AdminOverviewPage() {
                       {p.event_name && (
                         <span className="ml-2 text-muted-foreground">
                           {p.event_name}
+                        </span>
+                      )}
+                      {p.lane && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({p.lane === "vendor_settlement" ? "Vendor" : "Host"})
                         </span>
                       )}
                     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -37,6 +38,7 @@ import {
 import { useDebounce } from "@/hooks/use-debounce";
 import { toast } from "sonner";
 import { Search, Ban, CheckCircle } from "lucide-react";
+import { getApiBase } from "@/lib/api-base";
 
 interface Vendor {
   id: number;
@@ -48,8 +50,6 @@ interface Vendor {
   is_active?: boolean;
   created_at?: string | null;
 }
-
-const API_BASE = "http://localhost:5000";
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -79,7 +79,7 @@ export default function AdminVendorsPage() {
       params.set("per_page", String(perPage));
       params.set("role", "vendor");
       if (debouncedSearch) params.set("q", debouncedSearch);
-      const res = await fetch(`${API_BASE}/api/admin/users?${params}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -106,7 +106,7 @@ export default function AdminVendorsPage() {
     if (!token) return;
     setUpdatingId(vendor.id);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${vendor.id}`, {
+      const res = await fetch(`${getApiBase()}/api/admin/users/${vendor.id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -228,6 +228,10 @@ export default function AdminVendorsPage() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" size="sm" asChild>
+                              <Link href={`/admin/users/${v.id}`}>Profile</Link>
+                            </Button>
                           {v.is_active !== false ? (
                             <Button
                               variant="ghost"
@@ -251,6 +255,7 @@ export default function AdminVendorsPage() {
                               Unblock
                             </Button>
                           )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

@@ -26,7 +26,7 @@ import {
 } from "recharts";
 import { UserPlus } from "lucide-react";
 
-const API_BASE = "http://localhost:5000";
+import { getApiBase } from "@/lib/api-base";
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -44,7 +44,7 @@ export default function AdminAnalyticsPage() {
       setLoading(false);
       return;
     }
-    fetch(`${API_BASE}/api/admin/analytics?days=90`, {
+    fetch(`${getApiBase()}/api/admin/analytics?days=90`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : null))

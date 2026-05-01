@@ -63,6 +63,8 @@ export function MarketingLayout({ children }: MarketingLayoutProps) {
 
   const handleSignOut = useCallback(() => {
     localStorage.clear()
+    document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+    document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
     setUser(null)
     setRole(null)
     setDropdownOpen(false)
