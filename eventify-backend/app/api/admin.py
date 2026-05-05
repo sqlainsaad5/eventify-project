@@ -200,7 +200,7 @@ def admin_user_summary(user_id):
 @admin_bp.route("/users/<int:user_id>", methods=["PATCH"])
 @jwt_required()
 def admin_patch_user(user_id):
-    """Update user: name, email, role, city, phone, category, is_active."""
+    """Update user: name, role, city, phone, category, is_active. Email is immutable from admin."""
     _, err = require_admin()
     if err:
         return err
@@ -212,8 +212,6 @@ def admin_patch_user(user_id):
     data = request.get_json() or {}
     if "name" in data and data["name"] is not None:
         user.name = data["name"]
-    if "email" in data and data["email"] is not None:
-        user.email = data["email"].strip().lower()
     if "role" in data and data["role"] is not None:
         user.role = data["role"]
     if "city" in data:

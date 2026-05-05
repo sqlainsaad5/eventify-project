@@ -18,11 +18,11 @@ export default function AdminProfilePage() {
           </div>
           <div>
             <label className="text-sm text-gray-700">Email</label>
-            <Input placeholder="admin@example.com" />
+            <Input placeholder="admin@example.com" disabled />
           </div>
           <div>
             <label className="text-sm text-gray-700">Password</label>
-            <Input type="password" placeholder="********" />
+            <Input type="password" placeholder="********" disabled />
           </div>
           <Button className="bg-purple-600 hover:bg-purple-700 text-white w-full">
             Save Changes

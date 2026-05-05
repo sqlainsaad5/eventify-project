@@ -17,7 +17,6 @@ import {
   Menu,
   X,
   Sparkles,
-  FileText,
   LogOut,
 } from "lucide-react"
 
@@ -27,7 +26,6 @@ const navItems = [
   { href: "/admin/vendors", label: "Vendors", icon: ClipboardList },
   { href: "/admin/organizers", label: "Organizers", icon: Users },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/admin/reports", label: "Reports", icon: FileText },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/admin/profile", label: "Settings", icon: Settings },

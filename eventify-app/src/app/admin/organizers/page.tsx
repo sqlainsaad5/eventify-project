@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/pagination";
 import { useDebounce } from "@/hooks/use-debounce";
 import { toast } from "sonner";
-import { Search, Calendar } from "lucide-react";
+import { Search } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
 
 interface Organizer {
@@ -179,19 +179,9 @@ export default function AdminOrganizersPage() {
                         <TableCell>{o.events_total ?? 0}</TableCell>
                         <TableCell>{o.events_pending ?? 0}</TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button variant="outline" size="sm" asChild>
-                              <Link href={`/admin/users/${o.id}`}>Profile</Link>
-                            </Button>
-                            <Button variant="outline" size="sm" asChild>
-                              <Link
-                                href={`/admin/events?organizer_id=${o.id}`}
-                              >
-                                <Calendar className="mr-1 size-4" />
-                                Events
-                              </Link>
-                            </Button>
-                          </div>
+                          <Button variant="outline" size="sm" asChild>
+                            <Link href={`/admin/users/${o.id}`}>Profile</Link>
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))

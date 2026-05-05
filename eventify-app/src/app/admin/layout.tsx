@@ -19,8 +19,6 @@ import {
   LogOut,
   Star,
   MessageSquare,
-  ClipboardList,
-  FileText,
   MessageCircleQuestion,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
@@ -56,11 +54,9 @@ const navItems = [
   { href: "/admin/events", label: "Events", icon: Calendar },
   { href: "/admin/payments", label: "Payments", icon: CreditCard },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/admin/reports", label: "Reports", icon: FileText },
   { href: "/admin/feedback", label: "Feedback", icon: MessageCircleQuestion },
   { href: "/admin/reviews", label: "Reviews", icon: Star },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
-  { href: "/admin/agreements", label: "Agreements", icon: ClipboardList },
   { href: "/admin/profile", label: "Profile", icon: UserCircle },
 ];
 

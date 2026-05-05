@@ -78,7 +78,7 @@ export default function AdminUsersPage() {
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", email: "", is_active: true });
+  const [editForm, setEditForm] = useState({ name: "", is_active: true });
   const [saving, setSaving] = useState(false);
 
   const fetchUsers = useCallback(async () => {
@@ -174,7 +174,6 @@ export default function AdminUsersPage() {
     setEditUser(user);
     setEditForm({
       name: user.name ?? "",
-      email: user.email ?? "",
       is_active: user.is_active !== false,
     });
   };
@@ -191,7 +190,10 @@ export default function AdminUsersPage() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(editForm),
+        body: JSON.stringify({
+          name: editForm.name,
+          is_active: editForm.is_active,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -516,8 +518,8 @@ export default function AdminUsersPage() {
               <Input
                 id="edit-email"
                 type="email"
-                value={editForm.email}
-                onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))}
+                value={editUser?.email ?? ""}
+                disabled
               />
             </div>
             <div className="flex items-center gap-2">
