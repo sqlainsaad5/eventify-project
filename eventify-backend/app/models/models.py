@@ -233,6 +233,7 @@ class Event(db.Model):
             "organizer_final_requested": bool(self.organizer_final_requested),
             "organizer_final_paid": bool(self.organizer_final_paid),
             "user_id": self.user_id,
+            "host_name": self.creator.name if self.creator else None,
             "organizer_id": self.organizer_id,
             "organizer_name": self.organizer.name if self.organizer else None,
             "organizer_status": self.organizer_status,
@@ -443,6 +444,69 @@ class Review(db.Model):
         }
         if include_author and self.author:
             d["author_name"] = self.author.name
+        return d
+
+
+class Complaint(db.Model):
+    """Event-scoped complaints filed by users, organizers, or vendors for admin review."""
+
+    __tablename__ = "complaint"
+    __table_args__ = (
+        db.Index("ix_complaint_status_created", "status", "created_at"),
+        db.Index("ix_complaint_subject_status", "subject_id", "status"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("event.id"), nullable=False)
+    complainant_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    complaint_type = db.Column(db.String(40), nullable=False)
+    category = db.Column(db.String(80), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    attachment_urls = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="open")
+    admin_notes = db.Column(db.Text, nullable=True)
+    resolution_action = db.Column(db.String(40), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+    event = db.relationship("Event", backref=db.backref("complaints", lazy="dynamic"))
+    complainant = db.relationship("User", foreign_keys=[complainant_id], backref="complaints_filed")
+    subject = db.relationship("User", foreign_keys=[subject_id], backref="complaints_received")
+
+    def to_dict(self, include_names: bool = True):
+        import json
+
+        urls = []
+        if self.attachment_urls:
+            try:
+                urls = json.loads(self.attachment_urls)
+            except (TypeError, ValueError):
+                urls = []
+        d = {
+            "id": self.id,
+            "event_id": self.event_id,
+            "complainant_id": self.complainant_id,
+            "subject_id": self.subject_id,
+            "complaint_type": self.complaint_type,
+            "category": self.category,
+            "description": self.description,
+            "attachment_urls": urls,
+            "status": self.status,
+            "admin_notes": self.admin_notes,
+            "resolution_action": self.resolution_action,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+        }
+        if include_names:
+            if self.complainant:
+                d["complainant_name"] = self.complainant.name
+                d["complainant_role"] = self.complainant.role
+            if self.subject:
+                d["subject_name"] = self.subject.name
+                d["subject_role"] = self.subject.role
+            if self.event:
+                d["event_name"] = self.event.name
         return d
 
 

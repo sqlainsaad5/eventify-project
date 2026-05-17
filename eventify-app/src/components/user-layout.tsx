@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { NotificationBell } from "@/components/notification-bell"
+import { ComplaintReportButton } from "@/components/complaint-dialog"
 import {
   Menu,
   X,
@@ -316,6 +317,7 @@ export function UserLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="ml-auto flex items-center gap-3">
+              <ComplaintReportButton role="user" />
               <NotificationBell />
               <div className="h-8 w-px bg-slate-200/60 mx-1" />
               <Avatar className="h-9 w-9">

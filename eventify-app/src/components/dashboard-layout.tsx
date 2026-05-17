@@ -22,6 +22,7 @@ import {
   Briefcase
 } from "lucide-react"
 import { NotificationBell } from "@/components/notification-bell"
+import { ComplaintReportButton } from "@/components/complaint-dialog"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -463,6 +464,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               <Menu className="h-6 w-6" />
             </button>
             <div className="flex items-center gap-4 ml-auto">
+              <ComplaintReportButton role="organizer" />
               <NotificationBell />
 
               <div className="h-8 w-[1px] bg-slate-200 mx-1" />

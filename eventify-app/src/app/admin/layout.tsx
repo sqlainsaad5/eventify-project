@@ -19,7 +19,7 @@ import {
   LogOut,
   Star,
   MessageSquare,
-  MessageCircleQuestion,
+  Flag,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
 import {
@@ -54,7 +54,7 @@ const navItems = [
   { href: "/admin/events", label: "Events", icon: Calendar },
   { href: "/admin/payments", label: "Payments", icon: CreditCard },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/admin/feedback", label: "Feedback", icon: MessageCircleQuestion },
+  { href: "/admin/feedback", label: "Complaints", icon: Flag },
   { href: "/admin/reviews", label: "Reviews", icon: Star },
   { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/profile", label: "Profile", icon: UserCircle },
@@ -75,6 +75,7 @@ export default function AdminLayout({
       pending_requests?: number;
       pending_organizer_requests?: number;
     };
+    complaints?: { open?: number };
   } | null>(null);
 
   useEffect(() => {
@@ -102,7 +103,8 @@ export default function AdminLayout({
   const pendingRequests = overview?.payments?.pending_requests ?? 0;
   const pendingOrgRequests =
     overview?.payments?.pending_organizer_requests ?? 0;
-  const pendingTotal = pendingEvents + pendingRequests + pendingOrgRequests;
+  const openComplaints = overview?.complaints?.open ?? 0;
+  const pendingTotal = pendingEvents + pendingRequests + pendingOrgRequests + openComplaints;
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -242,6 +244,13 @@ export default function AdminLayout({
                         <Link href="/admin/payments?tab=organizer-requests">
                           Pending organizer payment requests (
                           {pendingOrgRequests})
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                    {openComplaints > 0 && (
+                      <DropdownMenuItem asChild>
+                        <Link href="/admin/feedback">
+                          Open complaints ({openComplaints})
                         </Link>
                       </DropdownMenuItem>
                     )}

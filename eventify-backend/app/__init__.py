@@ -35,12 +35,14 @@ def create_app():
         ensure_user_organizer_columns,
         ensure_vendor_events_partnership_columns,
         ensure_event_timestamps,
+        ensure_complaint_table,
     )
 
     ensure_user_organizer_columns(app)
     ensure_budget_plan_table(app)
     ensure_vendor_events_partnership_columns(app)
     ensure_event_timestamps(app)
+    ensure_complaint_table(app)
 
     # ✅ Smart CORS configuration
     def dynamic_origin(origin):
@@ -176,6 +178,7 @@ def create_app():
     from .api.services import services_bp
     from .api.admin import admin_bp
     from .api.reviews import reviews_bp
+    from .api.complaints import complaints_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(events_bp)
@@ -185,6 +188,7 @@ def create_app():
     app.register_blueprint(services_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(reviews_bp)
+    app.register_blueprint(complaints_bp)
 
     @app.route("/")
     def index():

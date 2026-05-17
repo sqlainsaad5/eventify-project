@@ -112,3 +112,14 @@ def ensure_event_timestamps(app) -> None:
                 )
         except Exception as ex:
             app.logger.warning("ensure_event_timestamps: %s", ex)
+
+
+def ensure_complaint_table(app) -> None:
+    """Create complaint table if missing (matches models + migrations)."""
+    with app.app_context():
+        try:
+            from app.models.models import Complaint
+
+            Complaint.__table__.create(bind=db.engine, checkfirst=True)
+        except Exception as ex:
+            app.logger.warning("ensure_complaint_table: %s", ex)

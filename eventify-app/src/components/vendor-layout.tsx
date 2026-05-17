@@ -20,6 +20,7 @@ import {
   Bell,
 } from "lucide-react"
 import { NotificationBell } from "@/components/notification-bell"
+import { ComplaintReportButton } from "@/components/complaint-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -316,6 +317,7 @@ export function VendorLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="ml-auto flex items-center gap-3">
+              <ComplaintReportButton role="vendor" />
               <NotificationBell />
 
               <div className="h-8 w-px bg-slate-200/60 mx-1" />

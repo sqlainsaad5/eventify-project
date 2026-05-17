@@ -7,6 +7,7 @@ from app.models import (
     PaymentRequest,
     OrganizerPaymentRequest,
     Review,
+    Complaint,
     ChatMessage,
     EventVendorAgreement,
     BudgetPlanItem,
@@ -63,6 +64,7 @@ def admin_overview():
     opr_rejected = OrganizerPaymentRequest.query.filter_by(status="rejected").count()
     vendor_settlement_count = Payment.query.filter(Payment.vendor_id.isnot(None)).count()
     platform_or_host_count = Payment.query.filter(Payment.vendor_id.is_(None)).count()
+    open_complaints = Complaint.query.filter_by(status="open").count()
 
     return jsonify(
         {
@@ -88,6 +90,9 @@ def admin_overview():
                     "vendor_settlement": vendor_settlement_count,
                     "platform_or_host": platform_or_host_count,
                 },
+            },
+            "complaints": {
+                "open": open_complaints,
             },
         }
     ), 200
@@ -672,6 +677,109 @@ def admin_reviews():
         "page": page,
         "per_page": per_page,
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# Complaints (moderation queue)
+# ---------------------------------------------------------------------------
+
+COMPLAINT_STATUSES = frozenset({"open", "under_review", "resolved", "dismissed"})
+COMPLAINT_RESOLUTION_ACTIONS = frozenset({"none", "user_blocked", "warned"})
+
+
+def _complaint_admin_dict(c: Complaint) -> dict:
+    d = c.to_dict(include_names=True)
+    if c.subject is not None:
+        d["subject_is_active"] = bool(getattr(c.subject, "is_active", True))
+    else:
+        d["subject_is_active"] = True
+    return d
+
+
+@admin_bp.route("/complaints", methods=["GET"])
+@jwt_required()
+def admin_complaints():
+    _, err = require_admin()
+    if err:
+        return err
+
+    page = max(1, request.args.get("page", type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", type=int) or 20))
+    event_id = request.args.get("event_id", type=int)
+    complaint_type = request.args.get("complaint_type")
+    status = request.args.get("status")
+    q = (request.args.get("q") or "").strip()
+
+    query = Complaint.query
+    if event_id is not None:
+        query = query.filter_by(event_id=event_id)
+    if complaint_type:
+        query = query.filter_by(complaint_type=complaint_type)
+    if status:
+        query = query.filter_by(status=status)
+    if q:
+        like = f"%{q}%"
+        query = query.join(Event, Complaint.event_id == Event.id).filter(
+            or_(Complaint.description.ilike(like), Event.name.ilike(like))
+        )
+
+    total = query.count()
+    rows = (
+        query.order_by(Complaint.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return jsonify({
+        "complaints": [_complaint_admin_dict(c) for c in rows],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }), 200
+
+
+@admin_bp.route("/complaints/<int:complaint_id>", methods=["GET"])
+@jwt_required()
+def admin_complaint_detail(complaint_id):
+    _, err = require_admin()
+    if err:
+        return err
+
+    complaint = Complaint.query.get(complaint_id)
+    if not complaint:
+        return jsonify({"error": "Complaint not found"}), 404
+    return jsonify(_complaint_admin_dict(complaint)), 200
+
+
+@admin_bp.route("/complaints/<int:complaint_id>", methods=["PATCH"])
+@jwt_required()
+def admin_patch_complaint(complaint_id):
+    _, err = require_admin()
+    if err:
+        return err
+
+    complaint = Complaint.query.get(complaint_id)
+    if not complaint:
+        return jsonify({"error": "Complaint not found"}), 404
+
+    data = request.get_json() or {}
+    if "status" in data:
+        val = data["status"]
+        if val not in COMPLAINT_STATUSES:
+            return jsonify({"error": "Invalid status"}), 400
+        complaint.status = val
+        if val in ("resolved", "dismissed"):
+            complaint.resolved_at = datetime.utcnow()
+    if "admin_notes" in data:
+        complaint.admin_notes = data["admin_notes"]
+    if "resolution_action" in data:
+        val = data["resolution_action"]
+        if val is not None and val not in COMPLAINT_RESOLUTION_ACTIONS:
+            return jsonify({"error": "Invalid resolution_action"}), 400
+        complaint.resolution_action = val
+
+    db.session.commit()
+    return jsonify(_complaint_admin_dict(complaint)), 200
 
 
 @admin_bp.route("/chat-messages", methods=["GET"])
