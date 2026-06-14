@@ -1,12 +1,20 @@
 "use client"
 
 import Link from "next/link"
+import { useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Sparkles, ArrowRight, Bot } from "lucide-react"
+import { Sparkles, ArrowRight, Bot, Play } from "lucide-react"
 import { useMarketing } from "../marketing-context"
+
+const LIVE_DEMO_VIDEO = "/video/eventify-live-demo.mp4"
 
 export function HeroSection() {
   const { user, role, setShowAssistant } = useMarketing()
+  const demoRef = useRef<HTMLElement>(null)
+
+  const scrollToDemo = () => {
+    demoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
 
   return (
     <section className="relative pt-32 pb-40 overflow-hidden bg-white">
@@ -36,15 +44,16 @@ export function HeroSection() {
                     Get Started <ArrowRight className="h-6 w-6 ml-2 transition-transform group-hover:translate-x-1" />
                   </Button>
                 </Link>
-                <Link href="/login" className="w-full sm:w-auto">
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="w-full h-16 px-12 border-2 border-slate-100 bg-white text-slate-900 rounded-2xl text-xl font-bold hover:bg-slate-50 hover:border-slate-200 transition-all"
-                  >
-                    Live Demo
-                  </Button>
-                </Link>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="outline"
+                  className="w-full sm:w-auto h-16 px-12 border-2 border-slate-100 bg-white text-slate-900 rounded-2xl text-xl font-bold hover:bg-slate-50 hover:border-slate-200 transition-all gap-2"
+                  onClick={scrollToDemo}
+                >
+                  <Play className="h-5 w-5 fill-current" />
+                  Live Demo
+                </Button>
               </>
             ) : (
               <div className="flex flex-col sm:flex-row items-center justify-center gap-5 w-full sm:w-auto">
@@ -92,6 +101,27 @@ export function HeroSection() {
               </Link>
             </div>
           )}
+
+          <section
+            id="live-demo"
+            ref={demoRef}
+            className="mt-20 text-left scroll-mt-28"
+          >
+            <div className="rounded-3xl border border-slate-200/80 bg-slate-950 p-2 shadow-2xl shadow-indigo-200/40">
+              <video
+                className="w-full rounded-2xl aspect-video bg-black"
+                controls
+                playsInline
+                preload="metadata"
+              >
+                <source src={LIVE_DEMO_VIDEO} type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <p className="mt-4 text-center text-sm font-medium text-slate-500">
+              Watch the Eventify live demo — planning, vendors, and admin in action.
+            </p>
+          </section>
         </div>
       </div>
     </section>

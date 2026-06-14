@@ -17,3 +17,7 @@ eventify-backend/instance/
 eventify-backend/uploads/
 node_modules/
 .next/
+
+# Raw screen recordings — commit only compressed demo
+eventify-app/public/video/*
+!eventify-app/public/video/eventify-live-demo.mp4
