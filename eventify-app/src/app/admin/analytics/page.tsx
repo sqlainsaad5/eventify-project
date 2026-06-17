@@ -23,7 +23,6 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { CreditCard, Users, Calendar } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
 
 function getToken(): string | null {
@@ -79,11 +78,6 @@ export default function AdminAnalyticsPage() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 md:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-28 w-full" />
-          ))}
-        </div>
         <Skeleton className="h-[300px] w-full" />
       </div>
     );
@@ -91,63 +85,9 @@ export default function AdminAnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          Analytics
-        </h1>
-        <CardDescription>
-          Live figures from the admin API (last 90 days for charts).
-        </CardDescription>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total revenue (payments table)
-            </CardTitle>
-            <CreditCard className="size-5 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              Rs {(overview?.payments?.total_revenue ?? 0).toFixed(2)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {overview?.payments?.total ?? 0} payment rows
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Events
-            </CardTitle>
-            <Calendar className="size-5 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{overview?.events?.total ?? 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Budget sum Rs {(overview?.events?.total_budget ?? 0).toFixed(2)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Users
-            </CardTitle>
-            <Users className="size-5 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{overview?.users?.total ?? 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Org {overview?.users?.organizers ?? 0} · Ven{" "}
-              {overview?.users?.vendors ?? 0} · Clients{" "}
-              {overview?.users?.clients ?? 0}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">
+        Analytics
+      </h1>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
