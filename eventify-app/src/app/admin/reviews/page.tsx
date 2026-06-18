@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDebounce } from "@/hooks/use-debounce";
 import {
   Table,
   TableBody,
@@ -46,6 +46,13 @@ interface ReviewRow {
   created_at?: string | null;
 }
 
+interface EventOption {
+  id: number;
+  name: string;
+  date?: string;
+  venue?: string;
+}
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("token")?.replace(/['"]+/g, "").trim() ?? null;
@@ -57,10 +64,52 @@ export default function AdminReviewsPage() {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
   const [loading, setLoading] = useState(true);
-  const [eventIdInput, setEventIdInput] = useState("");
   const [eventId, setEventId] = useState<number | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<EventOption | null>(null);
+  const [eventOptions, setEventOptions] = useState<EventOption[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventSearch, setEventSearch] = useState("");
+  const debouncedEventSearch = useDebounce(eventSearch, 350);
   const [reviewType, setReviewType] = useState<string>("");
   const [status, setStatus] = useState<string>("");
+
+  const fetchEventOptions = useCallback(async () => {
+    const token = getToken();
+    if (!token) {
+      setEventsLoading(false);
+      return;
+    }
+    setEventsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("page", "1");
+      params.set("per_page", "100");
+      if (debouncedEventSearch.trim()) {
+        params.set("q", debouncedEventSearch.trim());
+      }
+      const res = await fetch(`${getApiBase()}/api/admin/events?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setEventOptions(
+        (data.events ?? []).map((e: EventOption) => ({
+          id: e.id,
+          name: e.name,
+          date: e.date,
+          venue: e.venue,
+        }))
+      );
+    } catch {
+      /* non-blocking */
+    } finally {
+      setEventsLoading(false);
+    }
+  }, [debouncedEventSearch]);
+
+  useEffect(() => {
+    fetchEventOptions();
+  }, [fetchEventOptions]);
 
   const fetchReviews = useCallback(async () => {
     const token = getToken();
@@ -97,23 +146,12 @@ export default function AdminReviewsPage() {
     fetchReviews();
   }, [fetchReviews]);
 
-  const applyEventFilter = () => {
-    const v = eventIdInput.trim();
-    if (!v) {
-      setEventId(null);
-      setPage(1);
-      return;
-    }
-    const n = parseInt(v, 10);
-    if (Number.isNaN(n)) {
-      toast.error("Event ID must be a number");
-      return;
-    }
-    setEventId(n);
-    setPage(1);
-  };
-
   const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const eventSelectValue = eventId != null ? String(eventId) : "__all__";
+  const eventSelectOptions =
+    selectedEvent && !eventOptions.some((e) => e.id === selectedEvent.id)
+      ? [selectedEvent, ...eventOptions]
+      : eventOptions;
 
   return (
     <div className="space-y-6">
@@ -132,18 +170,47 @@ export default function AdminReviewsPage() {
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-4">
           <div className="space-y-2">
-            <label className="text-sm text-muted-foreground">Event ID</label>
-            <div className="flex gap-2">
-              <Input
-                placeholder="e.g. 12"
-                value={eventIdInput}
-                onChange={(e) => setEventIdInput(e.target.value)}
-                className="w-32"
-              />
-              <Button type="button" variant="secondary" onClick={applyEventFilter}>
-                Apply
-              </Button>
-            </div>
+            <label className="text-sm text-muted-foreground">Event</label>
+            <Input
+              placeholder="Search events by name or venue"
+              value={eventSearch}
+              onChange={(e) => setEventSearch(e.target.value)}
+              className="w-[280px]"
+            />
+            <Select
+              value={eventSelectValue}
+              onValueChange={(v) => {
+                if (v === "__all__") {
+                  setEventId(null);
+                  setSelectedEvent(null);
+                } else {
+                  const id = Number(v);
+                  const picked =
+                    eventOptions.find((e) => e.id === id) ??
+                    selectedEvent ??
+                    ({ id, name: `Event #${id}` } satisfies EventOption);
+                  setEventId(id);
+                  setSelectedEvent(picked);
+                }
+                setPage(1);
+              }}
+              disabled={eventsLoading}
+            >
+              <SelectTrigger className="w-[280px]">
+                <SelectValue
+                  placeholder={eventsLoading ? "Loading events…" : "All events"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All events</SelectItem>
+                {eventSelectOptions.map((e) => (
+                  <SelectItem key={e.id} value={String(e.id)}>
+                    {e.name}
+                    {e.date ? ` · ${e.date}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-muted-foreground">Type</label>

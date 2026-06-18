@@ -18,7 +18,6 @@ import {
   Zap,
   LogOut,
   Star,
-  MessageSquare,
   Flag,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
@@ -56,7 +55,6 @@ const navItems = [
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/feedback", label: "Complaints", icon: Flag },
   { href: "/admin/reviews", label: "Reviews", icon: Star },
-  { href: "/admin/messages", label: "Messages", icon: MessageSquare },
   { href: "/admin/profile", label: "Profile", icon: UserCircle },
 ];
 
